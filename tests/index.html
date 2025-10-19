@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Laboratório de Motor de Buscas — Site A</title>
+  <meta name="description" content="Site A: página de teste para analisar crawling, indexação, relevância e link graph do meu motor de buscas." />
+  <meta name="robots" content="index,follow,max-image-preview:large" />
+  <link rel="canonical" href="https://exemplo.local/site-a/" />
+  <link rel="alternate" type="application/rss+xml" title="Feed de testes" href="https://exemplo.local/site-a/feed.xml" />
+  <meta property="og:title" content="Laboratório de Motor de Buscas — Site A" />
+  <meta property="og:description" content="Página de teste com textos, variações de links e dados estruturados para avaliar o comportamento do motor de buscas." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://exemplo.local/site-a/" />
+  <meta property="og:image" content="https://exemplo.local/site-a/og.png" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "Laboratório de Motor de Buscas — Site A",
+    "url": "https://exemplo.local/site-a/",
+    "description": "Ambiente controlado para testar crawling, indexação e ranking (Site A)",
+    "sameAs": ["https://exemplo.local/site-b/"]
+  }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg:#0f1222; --bg-soft:#151935; --text:#e9ecf1; --muted:#a5aec1; --brand:#6c8cff; --brand-2:#8b5cf6; --border:#232749; }
+    @media (prefers-color-scheme: light) { :root { --bg:#f7f8fc; --bg-soft:#fff; --text:#0b1020; --muted:#5b6478; --border:#e6e8f2; } }
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;color:var(--text);background:var(--bg);} 
+    header{position:sticky;top:0;backdrop-filter:saturate(1.2) blur(8px);background:color-mix(in oklab, var(--bg-soft) 85%, transparent);border-bottom:1px solid var(--border)}
+    .container{width:min(1100px,92%);margin-inline:auto}
+    .nav{display:flex;align-items:center;justify-content:space-between;padding:.9rem 0}
+    .brand{display:flex;align-items:center;gap:.6rem;font-weight:800}
+    .brand i{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,var(--brand),var(--brand-2));box-shadow:0 0 0 4px rgba(108,140,255,.15)}
+    .links{display:flex;gap:1rem}
+    .links a{color:var(--muted);font-weight:600;padding:.35rem .6rem;border-radius:.6rem}
+    .links a:hover{color:var(--text);background:rgba(108,140,255,.12)}
+    main{padding:3rem 0}
+    h1{font-size:clamp(1.6rem,2.4vw,2.2rem);line-height:1.1;margin:.4rem 0}
+    .lead{color:var(--muted);max-width:70ch}
+    section{padding:2rem 0;border-top:1px dashed var(--border)}
+    code, pre{background:rgba(255,255,255,.05);padding:.2rem .4rem;border-radius:.35rem}
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem;margin-top:1rem}
+    .card{border:1px solid var(--border);border-radius:16px;padding:1rem;background:color-mix(in oklab, var(--bg-soft) 92%, transparent)}
+    footer{border-top:1px solid var(--border);padding:2rem 0;color:var(--muted)}
+    a[data-rel]{font-variant:all-small-caps;opacity:.9}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container nav">
+      <div class="brand"><i></i><span>Site A · Lab de Busca</span></div>
+      <nav class="links" aria-label="Navegação primária">
+        <a href="#conteudo">Conteúdo</a>
+        <a href="#links">Variações de Links</a>
+        <a href="#metadados">Metadados</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section id="hero" aria-labelledby="titulo-principal">
+      <p class="lead">Este é o <strong>Site A</strong>, criado para testar o comportamento do teu motor de buscas: crawling, indexação, scoring de texto, autoridade via links e sinais on-page.</p>
+      <h1 id="titulo-principal">Laboratório: textos, títulos e links — Site A</h1>
+    </section>
+
+    <section id="conteudo">
+      <h2>Texto canónico e termos alvo</h2>
+      <p>Frase alvo: <em>motor de buscas artesanal</em>. Repetição controlada para testar TF/IDF e BM25: motor de buscas artesanal, motor de buscas artesanal. Este parágrafo inclui variações semânticas: mecanismo de pesquisa, indexador de páginas, crawler, ranking por relevância.</p>
+      <div class="cards">
+        <article class="card" aria-labelledby="a1"><h3 id="a1">Documento curto</h3><p>Documento curto com densidade baixa e vocabulário variado. Útil para comparar contra documentos longos.</p></article>
+        <article class="card" aria-labelledby="a2"><h3 id="a2">Documento médio</h3><p>Inclui subtítulos, listas e âncoras internas. Ver <a href="#links">secção de links</a> para comportamento de PageRank.</p></article>
+        <article class="card" aria-labelledby="a3"><h3 id="a3">Documento longo</h3><p>Texto redundante e sinónimos para avaliar normalização, stemming e stopwords: buscar, pesquisa, procurar, query, consulta.</p></article>
+      </div>
+    </section>
+
+    <section id="links">
+      <h2>Variações de links (internos, externos e para o Site B)</h2>
+      <ul>
+        <li>Link interno com âncora: <a href="#metadados" title="Ir para metadados">Metadados</a></li>
+        <li>Link para <strong>Site B</strong> (dofollow): <a href="./site-b.html">Site B — Repositório de Testes</a></li>
+        <li>Link para <strong>Site B</strong> com <code>rel=nofollow</code>: <a data-rel="nofollow" href="./site-b.html" rel="nofollow">Site B (nofollow)</a></li>
+        <li>Link para <strong>Site B</strong> com <code>rel=ugc</code>: <a data-rel="ugc" href="./site-b.html" rel="ugc">Site B (ugc)</a></li>
+        <li>Link externo para diversificar grafo: <a href="https://www.example.com/" target="_blank" rel="noopener">Exemplo externo</a></li>
+      </ul>
+    </section>
+
+    <section id="metadados">
+      <h2>Metadados e sinais on-page</h2>
+      <ol>
+        <li><strong>Title/Description:</strong> definidos no <code>&lt;head&gt;</code>.</li>
+        <li><strong>Canonical:</strong> aponta para a versão principal deste documento.</li>
+        <li><strong>OpenGraph:</strong> melhora pré-visualizações (não deve afetar ranking textual).</li>
+        <li><strong>JSON-LD:</strong> descreve o site de forma estruturada.</li>
+      </ol>
+      <p>Também podes servir um <code>sitemap.xml</code> e um <code>robots.txt</code> para gerir o crawling.</p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>© <span id="ano"></span> Laboratório de Motor de Buscas — Site A. Criado para testes.</p>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('ano').textContent = new Date().getFullYear();
+  </script>
+
+
+</body>
+</html>
