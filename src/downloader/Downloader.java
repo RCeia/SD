@@ -32,7 +32,20 @@ public class Downloader implements IDownloader {
 
     @Override
     public void sendToBarrels(PageData data) throws RemoteException{
+        // Por agora, apenas imprime as informações recolhidas
+        System.out.println("\n--- Conteúdo da página ---");
+        System.out.println("URL: " + data.getUrl());
+        System.out.println("Título: " + data.getTitle());
+        System.out.println("Número de palavras: " + data.getWords().size());
 
+        // Mostra as primeiras 20 palavras para não inundar o terminal
+        System.out.println("Palavras (primeiras 20): " +
+                data.getWords().stream().limit(20).collect(Collectors.joining(" ")));
+
+        // Mostra os primeiros links encontrados
+        System.out.println("Links encontrados:");
+        data.getOutgoingLinks().stream().limit(5).forEach(link -> System.out.println("  🔗 " + link));
+        System.out.println("-----------------------------\n");
     }
 
     @Override
@@ -65,6 +78,8 @@ public class Downloader implements IDownloader {
                         .collect(Collectors.toList());
 
                 PageData pageData = new PageData(url, title, words, outgoingLinks);
+
+                sendToBarrels(pageData);
 
                 if (outgoingLinks.size() == 1) {
                     queue.addURL(outgoingLinks.get(0));

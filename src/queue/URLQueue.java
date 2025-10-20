@@ -98,7 +98,8 @@ public class URLQueue implements IQueue {
             System.out.println("Queue registada no RMI Registry como 'URLQueueInterface'.");
 
             // Adicionar URLs iniciais
-            queue.addURL("http://127.0.0.1:5500/index.html");
+            queue.addURL("https://www.google.com");
+            queue.addURLs(List.of("https://www.amazon.com", "https://www.uc.pt"));
 
             System.out.println("Queue pronta e à escuta...");
 
