@@ -19,27 +19,28 @@ import java.util.ArrayList;
 
 
 public class Downloader implements IDownloader {
+    private static int nextId = 1;
+    private final int id;
 
     private IQueue queue;
     private List<IBarrel> barrels = new ArrayList<>();
 
-
     public Downloader(IQueue queue) {
         super();
         this.queue = queue;
+        this.id = (int) (ProcessHandle.current().pid() * 10 + nextId++);
         discoverBarrels();
-
     }
 
     @Override
     public void takeURL(String url) throws RemoteException{
-        System.out.println("Recebi URL para download: " + url);
+        System.out.println("[Downloader" + id + "] - Recebi URL para download: " + url);
         download(url);
     }
 
     private void sendToBarrels(PageData data) throws RemoteException {
         if (barrels.isEmpty()) {
-            System.err.println("Nenhum Barrel disponível — URL será re-adicionado à Queue.");
+            System.err.println("Nenhum Barrel disponível, URL será re-adicionado à Queue.");
             try {
                 queue.addURL(data.getUrl());
             } catch (Exception e) {
@@ -48,7 +49,7 @@ public class Downloader implements IDownloader {
             return;
         }
 
-        System.out.println("\nA enviar página para os Barrels...");
+        System.out.println("\n [Downloader" + id + "] - A enviar página para os Barrels...");
         System.out.println("URL: " + data.getUrl());
         System.out.println("Título: " + data.getTitle());
         System.out.println("Palavras: " + data.getWords().size());
@@ -57,19 +58,16 @@ public class Downloader implements IDownloader {
         for (IBarrel barrel : barrels) {
             try {
                 barrel.storePage(data);
-                System.out.println("Enviado com sucesso para " + barrel);
+                System.out.println("[Downloader" + id +"] - Enviado com sucesso para " + barrel);
             } catch (Exception e) {
-                System.err.println("Falha ao enviar para um Barrel: " + e.getMessage());
+                System.err.println("[Downloader" + id + "] - Falha ao enviar para um Barrel: " + e.getMessage());
             }
         }
-
-        System.out.println("Envio concluído.\n");
     }
-
 
     @Override
     public void notifyFinished() throws RemoteException{
-        System.out.println("Download finished - notifying Queue...");
+        System.out.println("[Downloader" + id + "] - Download finished, notifying Queue...");
         try {
             queue.notifyDownloaderAvailable(this);
         } catch (Exception e) {
@@ -80,7 +78,7 @@ public class Downloader implements IDownloader {
     private void download(String url) {
         new Thread(() -> {
             try {
-                System.out.println("A descarregar: " + url);
+                System.out.println("[Downloader" + id + "] - Downloading: " + url);
 
                 Document doc = Jsoup.connect(url).get();
 
@@ -101,16 +99,16 @@ public class Downloader implements IDownloader {
 
                 if (outgoingLinks.size() == 1) {
                     queue.addURL(outgoingLinks.get(0));
-                    System.out.println("Adicionado 1 novo URL à Queue.");
+                    System.out.println("[Downloader" + id + "] - Adicionado 1 novo URL à Queue.");
                 } else if (!outgoingLinks.isEmpty()) {
                     queue.addURLs(outgoingLinks);
-                    System.out.println("Adicionados " + outgoingLinks.size() + " novos URLs à Queue.");
+                    System.out.println("[Downloader" + id + "] - Adicionados " + outgoingLinks.size() + " novos URLs à Queue.");
                 }
 
                 notifyFinished();
 
             } catch (Exception e) {
-                System.err.println("Erro ao processar URL: " + url + " -> será re-adicionado à Queue.");
+                System.err.println("[Downloader" + id + "] - Erro ao processar URL: " + url + ". Será re-adicionado à Queue.");
                 try {
                     queue.addURL(url);
                 } catch (Exception ex) {
@@ -151,8 +149,8 @@ public class Downloader implements IDownloader {
             Downloader downloader = new Downloader(queue);
             IDownloader stub = (IDownloader) UnicastRemoteObject.exportObject(downloader, 0);
 
-            queue.registerDownloader(stub);
-            System.out.println("Downloader registado e pronto para receber URLs.");
+            queue.registerDownloader(stub, downloader.id);
+            System.out.println("[Downloader" + downloader.id + "] - Registado e pronto para receber URLs.");
 
             synchronized (Downloader.class) {
                 Downloader.class.wait();

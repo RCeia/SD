@@ -5,21 +5,20 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.sql.SQLOutput;
-import java.util.LinkedList;
-import java.util.Queue;
-import java.util.List;
-import java.util.Arrays;
+import java.util.*;
 
 import downloader.IDownloader;
 
 public class URLQueue implements IQueue {
     private final Queue<String> urls;
-    private final Queue<IDownloader> availableDownloaders;
+    private final Map<Integer, IDownloader> downloaders;
+    private final Queue<Integer> availableDownloaders;
 
     public URLQueue() {
         super();
         this.urls = new LinkedList<>();
         this.availableDownloaders = new LinkedList<>();
+        this.downloaders = new HashMap<>();
     }
 
     @Override
@@ -47,30 +46,46 @@ public class URLQueue implements IQueue {
     }
 
     @Override
-    public synchronized void registerDownloader(IDownloader downloader) throws RemoteException {
-        System.out.println("Downloader registado: " + downloader);
-        availableDownloaders.add(downloader);
+    public synchronized void registerDownloader(IDownloader downloader, int id) throws RemoteException {
+        downloaders.put(id, downloader);
+        availableDownloaders.add(id);
+        System.out.println("[Queue] - Downloader " + id + " registado e disponível.");
         assignWork();
     }
+
     @Override
     public synchronized void notifyDownloaderAvailable(IDownloader downloader) throws RemoteException {
-        System.out.println("Downloader disponível novamente: " + downloader);
-        availableDownloaders.add(downloader);
-        assignWork();
+        int id = getIdFromStub(downloader);
+        if (id != -1) {
+            availableDownloaders.add(id);
+            System.out.println("[Queue] Downloader " + id + " disponível novamente.");
+            assignWork();
+        } else {
+            System.err.println("[Queue] Downloader desconhecido (stub não registado).");
+        }
+    }
+
+    private int getIdFromStub(IDownloader stub) {
+        for (var entry : downloaders.entrySet()) {
+            if (entry.getValue().equals(stub)) {
+                return entry.getKey();
+            }
+        }
+        return -1;
     }
 
     private synchronized void assignWork() {
         while (!urls.isEmpty() && !availableDownloaders.isEmpty()) {
-            IDownloader downloader = availableDownloaders.poll();
+            int id = availableDownloaders.poll();
+            IDownloader downloader = downloaders.get(id);
             String url = urls.poll();
 
             try {
+                System.out.println("[Queue] Atribuído URL a Downloader " + id + ": " + url);
                 downloader.takeURL(url);
-                System.out.println("URL atribuído ao downloader: " + url);
             } catch (RemoteException e) {
-                System.err.println("Falha ao contactar downloader: " + e.getMessage());
-                // devolve o URL à fila, pois não foi processado
-                urls.add(url);
+                System.err.println("[Queue] Falha ao contactar Downloader " + id + ": " + e.getMessage());
+                urls.add(url); // devolve o URL
             }
         }
     }
