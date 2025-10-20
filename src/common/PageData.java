@@ -3,7 +3,9 @@ package common;
 import java.io.Serializable;
 import java.util.List;
 
-public class PageData {
+public class PageData implements Serializable {
+    private static final long serialVersionUID = 1L;
+
     private String url;
     private String title;
     private List<String> words;
@@ -16,8 +18,19 @@ public class PageData {
         this.outgoingLinks = outgoingLinks;
     }
 
-    public String getUrl() { return url; }
-    public String getTitle() { return title; }
-    public List<String> getWords() { return words; }
-    public List<String> getOutgoingLinks() { return outgoingLinks; }
+    public String getUrl() {
+        return url;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public List<String> getWords() {
+        return words;
+    }
+
+    public List<String> getOutgoingLinks() {
+        return outgoingLinks;
+    }
 }

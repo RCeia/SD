@@ -14,14 +14,21 @@ import java.rmi.server.UnicastRemoteObject;
 
 import java.util.List;
 import java.util.stream.Collectors;
+import barrel.IBarrel;
+import java.util.ArrayList;
+
 
 public class Downloader implements IDownloader {
 
     private IQueue queue;
+    private List<IBarrel> barrels = new ArrayList<>();
+
 
     public Downloader(IQueue queue) {
         super();
         this.queue = queue;
+        discoverBarrels();
+
     }
 
     @Override
@@ -31,22 +38,30 @@ public class Downloader implements IDownloader {
     }
 
     @Override
-    public void sendToBarrels(PageData data) throws RemoteException{
-        // Por agora, apenas imprime as informações recolhidas
-        System.out.println("\n--- Conteúdo da página ---");
+    public void sendToBarrels(PageData data) throws RemoteException {
+        if (barrels.isEmpty()) {
+            System.err.println("⚠️ Nenhum Barrel disponível — não é possível enviar PageData.");
+            return;
+        }
+
+        System.out.println("\n📤 A enviar página para os Barrels...");
         System.out.println("URL: " + data.getUrl());
         System.out.println("Título: " + data.getTitle());
-        System.out.println("Número de palavras: " + data.getWords().size());
+        System.out.println("Palavras: " + data.getWords().size());
+        System.out.println("Links encontrados: " + data.getOutgoingLinks().size());
 
-        // Mostra as primeiras 20 palavras para não inundar o terminal
-        System.out.println("Palavras (primeiras 20): " +
-                data.getWords().stream().limit(20).collect(Collectors.joining(" ")));
+        for (IBarrel barrel : barrels) {
+            try {
+                barrel.storePage(data);
+                System.out.println("✅ Enviado com sucesso para " + barrel);
+            } catch (Exception e) {
+                System.err.println("⚠️ Falha ao enviar para um Barrel: " + e.getMessage());
+            }
+        }
 
-        // Mostra os primeiros links encontrados
-        System.out.println("Links encontrados:");
-        data.getOutgoingLinks().stream().limit(5).forEach(link -> System.out.println("  🔗 " + link));
-        System.out.println("-----------------------------\n");
+        System.out.println("📦 Envio concluído.\n");
     }
+
 
     @Override
     public void notifyFinished() throws RemoteException{
@@ -101,6 +116,28 @@ public class Downloader implements IDownloader {
             }
         }).start();
     }
+    private void discoverBarrels() {
+        try {
+            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
+            String[] boundNames = registry.list();
+
+            for (String bound : boundNames) {
+                if (bound.startsWith("Barrel")) {
+                    IBarrel barrel = (IBarrel) registry.lookup(bound);
+                    barrels.add(barrel);
+                    System.out.println("🔗 Ligado ao " + bound);
+                }
+            }
+
+            if (barrels.isEmpty()) {
+                System.out.println("⚠️ Nenhum Barrel encontrado no RMI Registry!");
+            }
+
+        } catch (Exception e) {
+            System.err.println("⚠️ Erro na descoberta de Barrels: " + e.getMessage());
+        }
+    }
+
 
     public static void main(String[] args) {
         try {
