@@ -37,14 +37,18 @@ public class Downloader implements IDownloader {
         download(url);
     }
 
-    @Override
-    public void sendToBarrels(PageData data) throws RemoteException {
+    private void sendToBarrels(PageData data) throws RemoteException {
         if (barrels.isEmpty()) {
-            System.err.println("⚠️ Nenhum Barrel disponível — não é possível enviar PageData.");
+            System.err.println("Nenhum Barrel disponível — URL será re-adicionado à Queue.");
+            try {
+                queue.addURL(data.getUrl());
+            } catch (Exception e) {
+                System.err.println("Erro ao re-adicionar URL à Queue: " + e.getMessage());
+            }
             return;
         }
 
-        System.out.println("\n📤 A enviar página para os Barrels...");
+        System.out.println("\nA enviar página para os Barrels...");
         System.out.println("URL: " + data.getUrl());
         System.out.println("Título: " + data.getTitle());
         System.out.println("Palavras: " + data.getWords().size());
@@ -53,13 +57,13 @@ public class Downloader implements IDownloader {
         for (IBarrel barrel : barrels) {
             try {
                 barrel.storePage(data);
-                System.out.println("✅ Enviado com sucesso para " + barrel);
+                System.out.println("Enviado com sucesso para " + barrel);
             } catch (Exception e) {
-                System.err.println("⚠️ Falha ao enviar para um Barrel: " + e.getMessage());
+                System.err.println("Falha ao enviar para um Barrel: " + e.getMessage());
             }
         }
 
-        System.out.println("📦 Envio concluído.\n");
+        System.out.println("Envio concluído.\n");
     }
 
 
@@ -73,8 +77,7 @@ public class Downloader implements IDownloader {
         }
     }
 
-    @Override
-    public void download(String url) {
+    private void download(String url) {
         new Thread(() -> {
             try {
                 System.out.println("A descarregar: " + url);
@@ -116,6 +119,7 @@ public class Downloader implements IDownloader {
             }
         }).start();
     }
+
     private void discoverBarrels() {
         try {
             Registry registry = LocateRegistry.getRegistry("localhost", 1099);
@@ -125,16 +129,16 @@ public class Downloader implements IDownloader {
                 if (bound.startsWith("Barrel")) {
                     IBarrel barrel = (IBarrel) registry.lookup(bound);
                     barrels.add(barrel);
-                    System.out.println("🔗 Ligado ao " + bound);
+                    System.out.println("Ligado ao " + bound);
                 }
             }
 
             if (barrels.isEmpty()) {
-                System.out.println("⚠️ Nenhum Barrel encontrado no RMI Registry!");
+                System.out.println("Nenhum Barrel encontrado no RMI Registry!");
             }
 
         } catch (Exception e) {
-            System.err.println("⚠️ Erro na descoberta de Barrels: " + e.getMessage());
+            System.err.println("Erro na descoberta de Barrels: " + e.getMessage());
         }
     }
 
