@@ -24,14 +24,14 @@ public class URLQueue implements IQueue {
     @Override
     public synchronized void addURL(String url) throws RemoteException {
         urls.add(url);
-        System.out.println("URL adicionado: " + url);
+        System.out.println("[Queue] - URL adicionado: " + url);
         assignWork();
     }
 
     @Override
     public synchronized void addURLs(List<String> newUrls) throws RemoteException {
         urls.addAll(newUrls);
-        System.out.println("URLs adicionados: " + newUrls.size());
+        System.out.println("[Queue] - URLs adicionados: " + newUrls.size());
         assignWork();
     }
 
@@ -58,7 +58,7 @@ public class URLQueue implements IQueue {
         int id = getIdFromStub(downloader);
         if (id != -1) {
             availableDownloaders.add(id);
-            System.out.println("[Queue] Downloader " + id + " disponível novamente.");
+            System.out.println("[Downloader" + id + "] -  Disponível novamente.");
             assignWork();
         } else {
             System.err.println("[Queue] Downloader desconhecido (stub não registado).");
@@ -102,21 +102,21 @@ public class URLQueue implements IQueue {
             Registry registry;
             try {
                 registry = LocateRegistry.createRegistry(1099);
-                System.out.println("Registry criado na porta 1099.");
+                System.out.println("[Queue] - Registry criado na porta 1099.");
             } catch (RemoteException e) {
                 registry = LocateRegistry.getRegistry(1099);
-                System.out.println("Ligado ao Registry existente.");
+                System.out.println("[Queue] - Ligado ao Registry existente.");
             }
 
             // Registar a Queue no Registry
             registry.rebind("URLQueueInterface", stub);
-            System.out.println("Queue registada no RMI Registry como 'URLQueueInterface'.");
+            System.out.println("[Queue] - Queue registada no RMI Registry como 'URLQueueInterface'.");
 
             // Adicionar URLs iniciais
             //queue.addURL("https://rceia.github.io/SD/tests/index.html");
             queue.addURL("https://www.google.com");
 
-            System.out.println("Queue pronta e à escuta...");
+            System.out.println("[Queue] - Queue pronta e à escuta...");
 
             // Manter servidor ativo
             synchronized (URLQueue.class) {
