@@ -143,7 +143,10 @@ public class Downloader implements IDownloader {
 
     public static void main(String[] args) {
         try {
-            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
+            String serverIP = args.length > 0 ? args[0] : "localhost";
+            int port = args.length > 1 ? Integer.parseInt(args[1]) : 1099;
+
+            Registry registry = LocateRegistry.getRegistry(serverIP, port);
             IQueue queue = (IQueue) registry.lookup("URLQueueInterface");
 
             Downloader downloader = new Downloader(queue);

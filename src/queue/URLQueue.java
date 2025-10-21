@@ -92,33 +92,42 @@ public class URLQueue implements IQueue {
 
     public static void main(String[] args) {
         try {
+            // Ler IP (hostname) e porta
+            String hostIP = args.length > 0 ? args[0] : "0.0.0.0";
+            int port = args.length > 1 ? Integer.parseInt(args[1]) : 1099;
+
+            // Define o IP que o RMI vai anunciar aos clientes
+            System.setProperty("java.rmi.server.hostname", hostIP);
+
             // Criar instância da Queue
             URLQueue queue = new URLQueue();
 
-            // Criar e exportar o objeto remoto
+            // Criar Registry local
+            Registry registry = LocateRegistry.createRegistry(port);
+
+            // Exportar e registar o objeto remoto
             IQueue stub = (IQueue) UnicastRemoteObject.exportObject(queue, 0);
-
-            // Criar (ou obter) o Registry na porta 1099
-            Registry registry;
-            try {
-                registry = LocateRegistry.createRegistry(1099);
-                System.out.println("[Queue] - Registry criado na porta 1099.");
-            } catch (RemoteException e) {
-                registry = LocateRegistry.getRegistry(1099);
-                System.out.println("[Queue] - Ligado ao Registry existente.");
-            }
-
-            // Registar a Queue no Registry
             registry.rebind("URLQueueInterface", stub);
-            System.out.println("[Queue] - Queue registada no RMI Registry como 'URLQueueInterface'.");
+
+            System.out.println("Queue ready on " + hostIP + ":" + port);
 
             // Adicionar URLs iniciais
-            //queue.addURL("https://rceia.github.io/SD/tests/index.html");
             queue.addURL("https://www.google.com");
 
-            System.out.println("[Queue] - Queue pronta e à escuta...");
+            // Hook de shutdown para limpar
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                try {
+                    System.out.println("\nShutting down Queue...");
+                    UnicastRemoteObject.unexportObject(queue, true);
+                    System.out.println("Queue stopped.");
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }));
 
-            // Manter servidor ativo
+            System.out.println("Queue is ready. Downloaders can now register.");
+
+            // Manter o servidor ativo
             synchronized (URLQueue.class) {
                 URLQueue.class.wait();
             }
@@ -127,4 +136,5 @@ public class URLQueue implements IQueue {
             e.printStackTrace();
         }
     }
+
 }
