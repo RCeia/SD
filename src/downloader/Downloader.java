@@ -101,8 +101,15 @@ public class Downloader implements IDownloader {
 
                 Document doc = Jsoup.connect(url).get();
 
-                String title = doc.title();
+
                 String text = doc.body().text();
+                if (text.trim().isEmpty()) {
+                    System.out.println("[Downloader" + id + "] - A página está vazia ou não contém conteúdo útil: " + url);
+                    notifyFinished();
+                    return;
+                }
+
+                String title = doc.title();
 
                 List<String> words = List.of(text.split("\\s+"));
 
