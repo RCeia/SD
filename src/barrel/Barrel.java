@@ -32,6 +32,11 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         return new HashMap<>(incomingLinks);
     }
 
+    @Override
+    public synchronized boolean isUrlInBarrels(String url) throws RemoteException {
+        return incomingLinks.containsKey(url);  // Retorna true se o URL estiver como chave no mapa
+    }
+
     // --- Armazenamento e replicação ---
     @Override
     public synchronized void storePage(PageData page) throws RemoteException {
@@ -52,11 +57,11 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
             try {
                 replica.replicate(page);
             } catch (Exception e) {
-                System.err.println("⚠️ Falha ao replicar para barrel: " + e.getMessage());
+                System.err.println("Falha ao replicar para barrel: " + e.getMessage());
             }
         }
 
-        System.out.println("📦 [" + name + "] Página armazenada e replicada: " + url);
+        System.out.println("[" + name + "] Página armazenada e replicada: " + url);
     }
 
     @Override
@@ -68,7 +73,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         for (String link : page.getOutgoingLinks()) {
             incomingLinks.computeIfAbsent(link, _ -> new HashSet<>()).add(url);
         }
-        System.out.println("🔁 [" + name + "] Réplica recebida de: " + url);
+        System.out.println("[" + name + "] Réplica recebida de: " + url);
     }
 
     // --- Pesquisa e estatísticas ---
@@ -107,7 +112,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
                         try {
                             replica.getIndexSize(); // método simples de ping
                             replicas.add(replica);
-                            System.out.println("🔗 [" + name + "] Conectado a réplica viva: " + bound);
+                            System.out.println("[" + name + "] Conectado a réplica viva: " + bound);
 
                             // Sincronizar índices
                             Map<String, Set<String>> otherIndex = replica.getInvertedIndex();
@@ -125,19 +130,19 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
                                         .addAll(entry.getValue());
                             }
 
-                            System.out.println("🔄 [" + name + "] Sincronizado com " + bound);
+                            System.out.println("[" + name + "] Sincronizado com " + bound);
 
                         } catch (RemoteException e) {
-                            System.err.println("⚠️ [" + name + "] Barrel " + bound + " inativo, ignorado.");
+                            System.err.println("[" + name + "] Barrel " + bound + " inativo, ignorado.");
                         }
 
                     } catch (Exception e) {
-                        System.err.println("⚠️ [" + name + "] Falha ao ligar a " + bound + ": " + e.getMessage());
+                        System.err.println("[" + name + "] Falha ao ligar a " + bound + ": " + e.getMessage());
                     }
                 }
             }
         } catch (Exception e) {
-            System.err.println("⚠️ [" + name + "] Erro na autodescoberta: " + e.getMessage());
+            System.err.println("[" + name + "] Erro na autodescoberta: " + e.getMessage());
         }
     }
 
@@ -170,7 +175,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
 
             Registry registry = LocateRegistry.getRegistry("localhost", 1099);
             registry.rebind(name, barrel);
-            System.out.println("✅ [" + name + "] Registado no RMI Registry.");
+            System.out.println("[" + name + "] Registado no RMI Registry.");
 
             // Descobrir automaticamente outros barrels
             barrel.discoverOtherBarrels(registry);
@@ -184,10 +189,10 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
                     if (cmd.equalsIgnoreCase("show")) {
                         barrel.printStoredLinks();
                     } else if (cmd.equalsIgnoreCase("exit")) {
-                        System.out.println("🛑 Encerrando " + name + "...");
+                        System.out.println("Encerrando " + name + "...");
                         System.exit(0);
                     } else {
-                        System.out.println("❓ Comando desconhecido. Use 'show' ou 'exit'.");
+                        System.out.println("Comando desconhecido. Use 'show' ou 'exit'.");
                     }
                 }
             }).start();

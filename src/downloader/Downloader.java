@@ -2,6 +2,8 @@ package downloader;
 
 import common.PageData;
 import queue.IQueue;
+import barrel.IBarrel;
+
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -14,7 +16,6 @@ import java.rmi.server.UnicastRemoteObject;
 
 import java.util.List;
 import java.util.stream.Collectors;
-import barrel.IBarrel;
 import java.util.ArrayList;
 
 
@@ -24,6 +25,10 @@ public class Downloader implements IDownloader {
 
     private IQueue queue;
     private List<IBarrel> barrels = new ArrayList<>();
+
+    private Thread preProcessingThread;
+    private Thread processingThread;
+    private Thread sendingThread;
 
     public Downloader(IQueue queue) {
         super();
