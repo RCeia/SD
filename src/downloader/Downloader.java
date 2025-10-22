@@ -9,6 +9,7 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.jsoup.Connection;
 
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -92,9 +93,8 @@ public class Downloader implements IDownloader {
             try {
                 System.out.println("[Downloader" + id + "] - Downloading: " + url);
 
-                String contentType = Jsoup.connect(url).execute().contentType();
-                if (contentType == null || !contentType.contains("text/html")){
-                    System.out.println("[Downloader" + id + "] - Este URL não respeito o formato permitido: " + url);
+                if (!url.toLowerCase().endsWith(".html")) {
+                    System.out.println("[Downloader" + id + "] - Este URL não respeita o formato permitido: " + url);
                     notifyFinished();
                     return;
                 }
