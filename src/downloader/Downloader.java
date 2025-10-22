@@ -1,5 +1,6 @@
 package downloader;
 
+import com.sun.security.jgss.GSSUtil;
 import common.PageData;
 import queue.IQueue;
 import barrel.IBarrel;
@@ -38,9 +39,15 @@ public class Downloader implements IDownloader {
     }
 
     @Override
-    public void takeURL(String url) throws RemoteException{
+    public void takeURL(String url) throws RemoteException {
         System.out.println("[Downloader" + id + "] - Recebi URL para download: " + url);
-        download(url);
+
+        if (!barrels.isEmpty() && barrels.getFirst().isUrlInBarrels(url)) {
+            System.out.println("[Downloader" + id + "] - O URL já está no Barrel. " + url);
+            notifyFinished();
+        } else {
+            download(url);
+        }
     }
 
     private void sendToBarrels(PageData data) throws RemoteException {

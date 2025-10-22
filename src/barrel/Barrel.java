@@ -34,7 +34,14 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
 
     @Override
     public synchronized boolean isUrlInBarrels(String url) throws RemoteException {
-        return incomingLinks.containsKey(url);  // Retorna true se o URL estiver como chave no mapa
+        for (Set<String> referringUrls : incomingLinks.values()) {
+            if (referringUrls.contains(url)) {
+                // O URL já foi referenciado, então já foi visitado
+                return true;
+            }
+        }
+        // Se não encontrar o URL, ele não foi visitado
+        return false;
     }
 
     // --- Armazenamento e replicação ---
