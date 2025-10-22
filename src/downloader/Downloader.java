@@ -42,7 +42,7 @@ public class Downloader implements IDownloader {
     public void takeURL(String url) throws RemoteException {
         System.out.println("[Downloader" + id + "] - Recebi URL para download: " + url);
 
-        if (!barrels.isEmpty() && barrels.getFirst().isUrlInBarrels(url)) {
+        if (barrels.getFirst().isUrlInBarrels(url)) {
             System.out.println("[Downloader" + id + "] - O URL já está no Barrel. " + url);
             notifyFinished();
         } else {
@@ -91,6 +91,13 @@ public class Downloader implements IDownloader {
         new Thread(() -> {
             try {
                 System.out.println("[Downloader" + id + "] - Downloading: " + url);
+
+                String contentType = Jsoup.connect(url).execute().contentType();
+                if (contentType == null || !contentType.contains("text/html")){
+                    System.out.println("[Downloader" + id + "] - Este URL não respeito o formato permitido: " + url);
+                    notifyFinished();
+                    return;
+                }
 
                 Document doc = Jsoup.connect(url).get();
 
