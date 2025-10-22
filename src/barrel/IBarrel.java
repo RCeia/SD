@@ -13,4 +13,7 @@ public interface IBarrel extends Remote {
     Map<String, String> search(List<String> terms) throws RemoteException;
     Set<String> getIncomingLinks(String url) throws RemoteException;
     int getIndexSize() throws RemoteException;
+    Map<String, Set<String>> getInvertedIndex() throws RemoteException;
+    Map<String, Set<String>> getIncomingLinksMap() throws RemoteException;
+
 }
