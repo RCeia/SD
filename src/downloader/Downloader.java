@@ -1,11 +1,15 @@
 package downloader;
 
+import com.sun.security.jgss.GSSUtil;
 import common.PageData;
 import queue.IQueue;
+import barrel.IBarrel;
+
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.jsoup.Connection;
 
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -14,7 +18,6 @@ import java.rmi.server.UnicastRemoteObject;
 
 import java.util.List;
 import java.util.stream.Collectors;
-import barrel.IBarrel;
 import java.util.ArrayList;
 
 
@@ -25,6 +28,10 @@ public class Downloader implements IDownloader {
     private IQueue queue;
     private List<IBarrel> barrels = new ArrayList<>();
 
+    private Thread preProcessingThread;
+    private Thread processingThread;
+    private Thread sendingThread;
+
     public Downloader(IQueue queue) {
         super();
         this.queue = queue;
@@ -33,9 +40,15 @@ public class Downloader implements IDownloader {
     }
 
     @Override
-    public void takeURL(String url) throws RemoteException{
+    public void takeURL(String url) throws RemoteException {
         System.out.println("[Downloader" + id + "] - Recebi URL para download: " + url);
-        download(url);
+
+        if (barrels.getFirst().isUrlInBarrels(url)) {
+            System.out.println("[Downloader" + id + "] - O URL já está no Barrel. " + url);
+            notifyFinished();
+        } else {
+            download(url);
+        }
     }
 
     private void sendToBarrels(PageData data) throws RemoteException {
@@ -80,10 +93,23 @@ public class Downloader implements IDownloader {
             try {
                 System.out.println("[Downloader" + id + "] - Downloading: " + url);
 
+                if (!url.toLowerCase().endsWith(".html")) {
+                    System.out.println("[Downloader" + id + "] - Este URL não respeita o formato permitido: " + url);
+                    notifyFinished();
+                    return;
+                }
+
                 Document doc = Jsoup.connect(url).get();
 
-                String title = doc.title();
+
                 String text = doc.body().text();
+                if (text.trim().isEmpty()) {
+                    System.out.println("[Downloader" + id + "] - A página está vazia ou não contém conteúdo útil: " + url);
+                    notifyFinished();
+                    return;
+                }
+
+                String title = doc.title();
 
                 List<String> words = List.of(text.split("\\s+"));
 
