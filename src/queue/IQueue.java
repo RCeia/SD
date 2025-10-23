@@ -13,5 +13,4 @@ public interface IQueue extends Remote {
 
     void registerDownloader(IDownloader downloader, int id) throws RemoteException;
     void notifyDownloaderAvailable(IDownloader downloader) throws RemoteException;
-
 }
