@@ -1,221 +1,172 @@
 package client;
 
 import gateway.IGateway;
+import common.RetryLogic;
 
 import java.rmi.NotBoundException;
+import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
-import java.rmi.RemoteException;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
 import java.util.Scanner;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
 
 public class Client {
 
-    private static final int RETRY_LIMIT = 3;      // Número máximo de tentativas
-    private static final long RETRY_DELAY = 1000;  // Delay entre tentativas (1 segundo)
-    private static final String[] GATEWAY_HOSTS = {"localhost", "backupGateway"};  // Lista de Gateways para Failover
+    private static final int RETRY_LIMIT = 3;
+    private static final long RETRY_DELAY = 1000;
+    private static final String[] GATEWAY_HOSTS = {"localhost", "backupGateway"};
     private static IGateway gateway = null;
 
-    // Método para conectar à Gateway com retry e failover
+    // Connect to any Gateway in the list
     public static boolean connectToGateway() {
-        int retries = 0;
-        while (retries < RETRY_LIMIT) {
+        for (int attempt = 0; attempt < RETRY_LIMIT; attempt++) {
             for (String host : GATEWAY_HOSTS) {
                 try {
-                    System.out.println("Tentando conectar à Gateway em " + host + "...");
                     Registry registry = LocateRegistry.getRegistry(host, 1099);
                     gateway = (IGateway) registry.lookup("Gateway");
                     System.out.println("Conectado com sucesso à Gateway em " + host);
-                    return true;  // Conexão bem-sucedida
+                    return true;
                 } catch (RemoteException e) {
-                    System.err.println("Falha ao conectar à Gateway em " + host + ". Tentando novamente...");
-                    retries++;
-                    if (retries >= RETRY_LIMIT) {
-                        System.err.println("Falha ao conectar à Gateway após várias tentativas.");
-                        return false;  // Falhou após múltiplas tentativas
-                    }
-                    try {
-                        Thread.sleep(RETRY_DELAY);  // Aguardar antes de tentar novamente
-                    } catch (InterruptedException ex) {
-                        Thread.currentThread().interrupt();
-                        System.err.println("Erro durante a espera entre tentativas.");
-                    }
+                    System.err.println("Falha ao conectar à Gateway em " + host + ": " + e.getMessage());
                 } catch (NotBoundException e) {
-                    throw new RuntimeException(e);
+                    System.err.println("Gateway não encontrada no host " + host + ": " + e.getMessage());
+                }
+
+                try {
+                    Thread.sleep(RETRY_DELAY);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
                 }
             }
         }
         return false;
     }
 
-    // Método para exibir o menu de opções
+    public static boolean reconnectToGateway() {
+        System.out.println("Tentando reconectar à Gateway...");
+        boolean success = connectToGateway();
+        if (success) System.out.println("Reconexão bem-sucedida!");
+        else System.err.println("Falha ao reconectar à Gateway.");
+        return success;
+    }
+
+    // Menu
     public static void showMenu() {
         Scanner scanner = new Scanner(System.in);
         while (true) {
-            System.out.println("\nEscolha a operação que deseja realizar:");
-            System.out.println("1 - Indexar um novo URL");
+            System.out.println("\nEscolha a operação:");
+            System.out.println("1 - Indexar URL");
             System.out.println("2 - Pesquisar páginas");
             System.out.println("3 - Consultar links para uma página");
             System.out.println("4 - Sair");
-            System.out.print("Digite o número da operação: ");
+            System.out.print("Opção: ");
+
             int choice = scanner.nextInt();
-            scanner.nextLine();  // Limpar o buffer de entrada
+            scanner.nextLine(); // limpar buffer
 
             switch (choice) {
-                case 1:
-                    System.out.print("Digite o URL para indexar: ");
+                case 1 -> {
+                    System.out.print("Digite o URL: ");
                     String url = scanner.nextLine();
                     indexURL(url);
-                    break;
-                case 2:
-                    System.out.print("Digite o termo de pesquisa: ");
-                    String searchTerm = scanner.nextLine();
-                    searchPages(searchTerm);
-                    break;
-                case 3:
-                    System.out.print("Digite o URL para consultar links apontando para ele: ");
-                    String targetUrl = scanner.nextLine();
-                    getIncomingLinks(targetUrl);
-                    break;
-                case 4:
-                    System.out.println("Saindo...");
-                    return;  // Encerra o menu
-                default:
-                    System.out.println("Opção inválida. Tente novamente.");
-            }
-        }
-    }
-
-    // Método genérico para retry
-    private static <T> T retryOperation(int retries, long delay, Operation<T> operation) throws InterruptedException, RemoteException {
-        int attempt = 0;
-        while (attempt < retries) {
-            try {
-                // Tenta realizar a operação
-                return operation.execute();
-            } catch (RemoteException e) {
-                // Em caso de falha, imprime erro e tenta novamente
-                System.err.println("Falha ao realizar a operação. Tentando novamente... " + e.getMessage());
-                attempt++;
-                if (attempt >= retries) {
-                    // Se falhou após as tentativas, tenta reconectar à Gateway
-                    System.err.println("Falha ao completar a operação após várias tentativas.");
-                    boolean reconnectSuccessful = reconnectToGateway(); // Tenta reconectar à Gateway
-                    if (reconnectSuccessful) {
-                        // Se reconectar com sucesso, tenta novamente a operação
-                        System.out.println("Reiniciando a operação...");
-                        return operation.execute();  // Reinicia a operação
-                    } else {
-                        throw new RuntimeException("Não foi possível reconectar à Gateway.", e);  // Se não reconectar, falha
-                    }
                 }
-                Thread.sleep(delay);  // Aguardar antes de tentar novamente
+                case 2 -> {
+                    System.out.print("Digite o termo de pesquisa: ");
+                    String term = scanner.nextLine();
+                    searchPages(term);
+                }
+                case 3 -> {
+                    System.out.print("Digite o URL para verificar links: ");
+                    String url = scanner.nextLine();
+                    getIncomingLinks(url);
+                }
+                case 4 -> {
+                    System.out.println("Saindo...");
+                    return;
+                }
+                default -> System.out.println("Opção inválida.");
             }
         }
-        return null;
     }
 
-    // Interface funcional para as operações (indexação, pesquisa, etc.)
-    @FunctionalInterface
-    interface Operation<T> {
-        T execute() throws RemoteException;
-    }
-
+    // Index URL
     public static void indexURL(String url) {
-        // Valida o formato do URL
         if (!isValidURL(url)) {
-            System.err.println("Erro: O URL fornecido não é válido.");
+            System.err.println("URL inválido.");
             return;
         }
 
         try {
-            // Tenta indexar o URL com retry
-            String status = retryOperation(RETRY_LIMIT, RETRY_DELAY, () -> {
-                if (gateway != null) {
-                    return gateway.indexURL(url);  // Realiza a indexação do URL
-                }
-                return null;
-            });
-            System.out.println(status);
-
-        } catch (RuntimeException | InterruptedException | RemoteException e) {
-            System.err.println("Erro ao indexar o URL: " + e.getMessage());
+            String result = RetryLogic.executeWithRetry(
+                    RETRY_LIMIT,
+                    RETRY_DELAY,
+                    Client::reconnectToGateway,
+                    () -> gateway.indexURL(url)
+            );
+            System.out.println(result);
+        } catch (Exception e) {
+            System.err.println("Erro ao indexar URL: " + e.getMessage());
         }
     }
 
-    // Método para verificar se o URL tem um formato válido
-    private static boolean isValidURL(String url) {
-        String regex = "^(https?|ftp)://[^\s/$.?#].[^\s]*$";  // Expressão regular para validar URLs HTTP/HTTPS/FTP
-        Pattern pattern = Pattern.compile(regex);
-        Matcher matcher = pattern.matcher(url);
-        return matcher.matches();
-    }
-
-
-    // Método para realizar uma pesquisa com retry
-    public static void searchPages(String searchTerm) {
+    // Search pages
+    public static void searchPages(String term) {
         try {
-            Map<String, String> results = retryOperation(RETRY_LIMIT, RETRY_DELAY, () -> {
-                if (gateway != null) {
-                    return gateway.search(searchTerm);  // Realiza a pesquisa
-                }
-                return null;
-            });
-            assert results != null;
-            if (results.isEmpty()) {
+            Map<String, String> results = RetryLogic.executeWithRetry(
+                    RETRY_LIMIT,
+                    RETRY_DELAY,
+                    Client::reconnectToGateway,
+                    () -> gateway.search(term)
+            );
+
+            if (results == null || results.isEmpty()) {
                 System.out.println("Nenhum resultado encontrado.");
-            } else {
-                System.out.println("Resultados da pesquisa:");
-                results.forEach((url, description) -> System.out.println("URL: " + url + " | Description: " + description));
+                return;
             }
-        } catch (RuntimeException | InterruptedException | RemoteException e) {
-            System.err.println("Erro ao realizar a pesquisa: " + e.getMessage());
+
+            System.out.println("Resultados:");
+            results.forEach((url, desc) -> System.out.println("URL: " + url + " | " + desc));
+
+        } catch (Exception e) {
+            System.err.println("Erro ao pesquisar: " + e.getMessage());
         }
     }
 
-    // Método para consultar links para uma página com retry
+    // Get incoming links
     public static void getIncomingLinks(String url) {
         try {
-            List<String> links = retryOperation(RETRY_LIMIT, RETRY_DELAY, () -> {
-                if (gateway != null) {
-                    return gateway.getIncomingLinks(url);  // Consulta os links
-                }
-                return null;
-            });
-            assert links != null;
-            if (links.isEmpty()) {
-                System.out.println("Nenhum link encontrado para a página.");
-            } else {
-                System.out.println("Links apontando para a página '" + url + "':");
-                links.forEach(System.out::println);
+            List<String> links = RetryLogic.executeWithRetry(
+                    RETRY_LIMIT,
+                    RETRY_DELAY,
+                    Client::reconnectToGateway,
+                    () -> gateway.getIncomingLinks(url)
+            );
+
+            if (links == null || links.isEmpty()) {
+                System.out.println("Nenhum link encontrado.");
+                return;
             }
-        } catch (RuntimeException | InterruptedException | RemoteException e) {
+
+            System.out.println("Links apontando para '" + url + "':");
+            links.forEach(System.out::println);
+
+        } catch (Exception e) {
             System.err.println("Erro ao consultar links: " + e.getMessage());
         }
     }
 
-    // Método para tentar reconectar à Gateway
-    public static boolean reconnectToGateway() {
-        System.out.println("Tentando reconectar à Gateway...");
-        boolean connected = connectToGateway();  // Tentativa de conexão com a Gateway
-        if (connected) {
-            System.out.println("Reconexão bem-sucedida com a Gateway.");
-        } else {
-            System.err.println("Falha ao reconectar à Gateway.");
-        }
-        return connected;
+    private static boolean isValidURL(String url) {
+        String regex = "^(https?|ftp)://[^\\s/$.?#].[^\\s]*$";
+        return Pattern.compile(regex).matcher(url).matches();
     }
 
     public static void main(String[] args) {
-        // Tentar conectar à Gateway com retry e failover
         if (connectToGateway()) {
-            showMenu();  // Exibe o menu de opções se a conexão for bem-sucedida
+            showMenu();
         } else {
-            System.err.println("Não foi possível conectar à Gateway após várias tentativas.");
+            System.err.println("Não foi possível conectar à Gateway.");
         }
     }
 }
