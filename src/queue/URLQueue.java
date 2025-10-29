@@ -4,8 +4,8 @@ import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
-import java.sql.SQLOutput;
 import java.util.*;
+import java.util.Scanner;
 
 import downloader.IDownloader;
 
@@ -90,6 +90,17 @@ public class URLQueue implements IQueue {
         }
     }
 
+    public synchronized void printAllURLs() throws RemoteException {
+        if (urls.isEmpty()) {
+            System.out.println("[Queue] A fila de URLs está vazia.");
+        } else {
+            System.out.println("[Queue] URLs na fila:");
+            for (String url : urls) {
+                System.out.println(url);
+            }
+        }
+    }
+
     public static void main(String[] args) {
         try {
             // Ler IP (hostname) e porta
@@ -112,7 +123,7 @@ public class URLQueue implements IQueue {
             System.out.println("Queue ready on " + hostIP + ":" + port);
 
             // Adicionar URLs iniciais
-            queue.addURL("https://rceia.github.io/SD/tests/index.html");
+            queue.addURL("www.google.com");
 
             // Hook de shutdown para limpar
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -127,7 +138,23 @@ public class URLQueue implements IQueue {
 
             System.out.println("Queue is ready. Downloaders can now register.");
 
-            // Manter o servidor ativo
+            // Criação de um scanner para o terminal
+            Scanner scanner = new Scanner(System.in);
+            while (true) {
+                System.out.println("\nDigite 'show' para ver os URLs da fila ou 'exit' para sair.");
+                String command = scanner.nextLine().trim().toLowerCase();
+
+                if ("show".equals(command)) {
+                    queue.printAllURLs();  // Chama o método para imprimir as URLs
+                } else if ("exit".equals(command)) {
+                    System.out.println("[Queue] Saindo...");
+                    break;  // Encerra o loop e finaliza a aplicação
+                } else {
+                    System.out.println("Comando desconhecido. Tente novamente.");
+                }
+            }
+
+            // Manter o servidor ativo até que o usuário digite 'exit'
             synchronized (URLQueue.class) {
                 URLQueue.class.wait();
             }
@@ -136,5 +163,4 @@ public class URLQueue implements IQueue {
             e.printStackTrace();
         }
     }
-
 }
