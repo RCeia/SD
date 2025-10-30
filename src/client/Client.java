@@ -7,6 +7,7 @@ import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
@@ -112,27 +113,28 @@ public class Client {
     }
 
     // Search pages
-    public static void searchPages(String term) {
+    public static void searchPages(String searchTerm) {
         try {
-            Map<String, String> results = RetryLogic.executeWithRetry(
-                    RETRY_LIMIT,
-                    RETRY_DELAY,
-                    Client::reconnectToGateway,
-                    () -> gateway.search(term)
-            );
+            // Separar os termos digitados por espaços
+            List<String> terms = Arrays.asList(searchTerm.trim().split("\\s+"));
 
-            if (results == null || results.isEmpty()) {
-                System.out.println("Nenhum resultado encontrado.");
-                return;
+            if (gateway != null) {
+                Map<String, String> results = gateway.search(terms);  // Chama o Gateway com a lista de palavras
+
+                if (results == null || results.isEmpty()) {
+                    System.out.println("Nenhum resultado encontrado.");
+                } else {
+                    System.out.println("Resultados da pesquisa:");
+                    results.forEach((url, description) -> System.out.println("URL: " + url + " | " + description));
+                }
+            } else {
+                System.err.println("Gateway não está conectado.");
             }
-
-            System.out.println("Resultados:");
-            results.forEach((url, desc) -> System.out.println("URL: " + url + " | " + desc));
-
-        } catch (Exception e) {
-            System.err.println("Erro ao pesquisar: " + e.getMessage());
+        } catch (RemoteException e) {
+            System.err.println("Erro ao realizar a pesquisa: " + e.getMessage());
         }
     }
+
 
     // Get incoming links
     public static void getIncomingLinks(String url) {
@@ -158,7 +160,7 @@ public class Client {
     }
 
     private static boolean isValidURL(String url) {
-        String regex = "^(https?|ftp)://[^\\s/$.?#].[^\\s]*$";
+        String regex = "^(https?|ftp)://[^\\s/$.?#].\\S*$";
         return Pattern.compile(regex).matcher(url).matches();
     }
 

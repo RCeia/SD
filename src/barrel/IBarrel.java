@@ -15,5 +15,5 @@ public interface IBarrel extends Remote {
     int getIndexSize() throws RemoteException;
     Map<String, Set<String>> getInvertedIndex() throws RemoteException;
     Map<String, Set<String>> getIncomingLinksMap() throws RemoteException;
-
+    boolean isUrlInBarrel(String url) throws RemoteException;
 }

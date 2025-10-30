@@ -71,23 +71,16 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         System.out.println("🔁 [" + name + "] Réplica recebida de: " + url);
     }
 
-    // --- Pesquisa e estatísticas ---
-    @Override
-    public Map<String, String> search(List<String> terms) throws RemoteException {
-        Map<String, String> results = new LinkedHashMap<>();
-        for (String term : terms) {
-            Set<String> urls = invertedIndex.get(term.toLowerCase());
-            if (urls != null) {
-                for (String url : urls)
-                    results.put(url, "Contém: " + term);
-            }
-        }
-        return results;
-    }
 
     @Override
-    public Set<String> getIncomingLinks(String url) throws RemoteException {
+    public synchronized Set<String> getIncomingLinks(String url) throws RemoteException {
         return incomingLinks.getOrDefault(url, Collections.emptySet());
+    }
+
+    // Optional: readable log when printing barrel in Gateway
+    @Override
+    public String toString() {
+        return "[" + name + "]";
     }
 
     @Override
@@ -160,6 +153,30 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
 
         System.out.println("=============================================\n");
+    }
+    @Override
+    public synchronized Map<String, String> search(List<String> terms) throws RemoteException {
+        Map<String, String> results = new LinkedHashMap<>();
+        for (String term : terms) {
+            Set<String> urls = invertedIndex.get(term.toLowerCase());
+            if (urls != null) {
+                for (String url : urls) {
+                    results.put(url, "Contém: " + term);
+                }
+            }
+        }
+        return results;
+    }
+
+    @Override
+    public synchronized boolean isUrlInBarrel(String url) throws RemoteException {
+        for (Set<String> urls : incomingLinks.values()) {
+            if (urls.contains(url)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // --- Main ---

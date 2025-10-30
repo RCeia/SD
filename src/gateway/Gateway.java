@@ -1,6 +1,7 @@
 package gateway;
 
 import queue.IQueue;
+import barrel.IBarrel;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
@@ -9,85 +10,117 @@ import java.util.*;
 
 public class Gateway extends UnicastRemoteObject implements IGateway {
 
-    private IQueue queue; // Referência à Queue
+    private final IQueue queue;
+    private final Map<IBarrel, Long> barrels; // Barrel -> last access time
+    private final Random random;
 
-    // Construtor agora configura a Queue diretamente no momento da criação
     public Gateway() throws RemoteException {
         super();
+        this.barrels = new HashMap<>();
+        this.random = new Random();
 
-        // Conectar-se ao RMI Registry existente (da URLQueue)
         try {
-            // Conectar-se ao RMI Registry existente (não cria um novo registry)
-            Registry registry = LocateRegistry.getRegistry("localhost", 1099); // Conectar-se ao registry da URLQueue
+            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
 
-            // Procurar pela URLQueue no RMI Registry
-            queue = (IQueue) registry.lookup("URLQueueInterface"); // Nome da URLQueue registrada no registry
-
+            // Connect to the URLQueue
+            queue = (IQueue) registry.lookup("URLQueueInterface");
             System.out.println("[Gateway] URLQueue conectada com sucesso.");
 
+            // Discover barrels registered as Barrel*
+            for (String name : registry.list()) {
+                if (name.startsWith("Barrel")) {
+                    IBarrel barrel = (IBarrel) registry.lookup(name);
+                    barrels.put(barrel, 0L); // 0 = never used
+                    System.out.println("[Gateway] Barrel encontrado e registado: " + name);
+                }
+            }
+
         } catch (Exception e) {
-            System.err.println("[Gateway] Erro ao conectar à URLQueue: " + e.getMessage());
-            throw new RemoteException("Erro ao conectar à URLQueue", e);
+            System.err.println("[Gateway] Erro ao conectar ao RMI Registry: " + e.getMessage());
+            throw new RemoteException("Erro ao conectar ao RMI Registry", e);
         }
     }
 
-    // Método para registrar a URL na Queue
+    private IBarrel chooseBarrel() {
+        if (barrels.isEmpty()) {
+            System.err.println("[Gateway] Nenhum Barrel disponível!");
+            return null;
+        }
+
+        // Never used barrels
+        List<IBarrel> neverUsed = new ArrayList<>();
+        long oldestTime = Long.MAX_VALUE;
+        IBarrel oldestBarrel = null;
+
+        for (Map.Entry<IBarrel, Long> entry : barrels.entrySet()) {
+            long lastUsed = entry.getValue();
+            if (lastUsed == 0) {
+                neverUsed.add(entry.getKey());
+            } else if (lastUsed < oldestTime) {
+                oldestTime = lastUsed;
+                oldestBarrel = entry.getKey();
+            }
+        }
+
+        if (!neverUsed.isEmpty()) {
+            return neverUsed.get(random.nextInt(neverUsed.size()));
+        }
+        return oldestBarrel;
+    }
+
     @Override
     public String indexURL(String url) throws RemoteException {
         System.out.println("[Gateway] Método indexURL chamado com o URL: " + url);
 
-        try {
-            if (queue != null) {
-                queue.addURL(url);  // A URLQueue agora é responsável por imprimir a mensagem
-                return "URL '" + url + "' indexado com sucesso na fila!";
-            } else {
-                return "Erro: Queue não está disponível.";
-            }
-        } catch (RemoteException e) {
-            return "Erro ao indexar o URL: " + e.getMessage();
+        if (queue != null) {
+            queue.addURL(url);
+            return "URL '" + url + "' indexado com sucesso na fila!";
+        } else {
+            return "Erro: Queue não está disponível.";
         }
     }
 
-    // Método de busca de URL
     @Override
-    public Map<String, String> search(String searchTerm) throws RemoteException {
-        System.out.println("[Gateway] Método search chamado com o termo de pesquisa: " + searchTerm);
+    public Map<String, String> search(List<String> terms) throws RemoteException {
+        System.out.println("[Gateway] Método search chamado com os termos: " + terms);
 
-        Map<String, String> results = new HashMap<>();
-        results.put("http://example.com", "Resultado encontrado para: " + searchTerm);
-        return results;
+        IBarrel chosen = chooseBarrel();
+        if (chosen == null) return Map.of("Erro", "Nenhum Barrel disponível");
+
+        try {
+            barrels.put(chosen, System.currentTimeMillis());
+            return chosen.search(terms); // delega ao barrel
+        } catch (RemoteException e) {
+            System.err.println("[Gateway] Erro ao consultar Barrel: " + e.getMessage());
+            return Map.of("Erro", "Falha ao consultar Barrel: " + e.getMessage());
+        }
     }
 
-    // Método para consultar links para uma página
+
     @Override
     public List<String> getIncomingLinks(String url) throws RemoteException {
         System.out.println("[Gateway] Método getIncomingLinks chamado com o URL: " + url);
 
-        return Arrays.asList("http://example1.com", "http://example2.com");
+        IBarrel chosen = chooseBarrel();
+        if (chosen == null) {
+            return Collections.singletonList("Nenhum Barrel disponível");
+        }
+
+        try {
+            barrels.put(chosen, System.currentTimeMillis());
+            return new ArrayList<>(chosen.getIncomingLinks(url));
+        } catch (RemoteException e) {
+            System.err.println("[Gateway] Erro ao consultar Barrel: " + e.getMessage());
+            return Collections.singletonList("Falha ao consultar Barrel: " + e.getMessage());
+        }
     }
 
-    // Método main para inicializar a Gateway
     public static void main(String[] args) {
         try {
-            // Não cria o RMI Registry, apenas se conecta ao existente
-            Registry registry = LocateRegistry.getRegistry("localhost", 1099);  // Conectar-se ao RMI Registry
-
-            // Criar a instância da Gateway
+            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
             Gateway gateway = new Gateway();
-
-            // Registrar a Gateway no RMI Registry (apenas se necessário)
             registry.rebind("Gateway", gateway);
-
             System.out.println("[Gateway] Gateway registrada no RMI Registry.");
-
-            // Aguardar a conexão da URLQueue
-            synchronized (Gateway.class) {
-                System.out.println("[Gateway] Aguardando a conexão da URLQueue...");
-                Gateway.class.wait();
-            }
-
-            System.out.println("[Gateway] URLQueue conectada com sucesso.");
-
         } catch (Exception e) {
             e.printStackTrace();
         }
