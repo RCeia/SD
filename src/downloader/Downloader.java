@@ -2,6 +2,7 @@ package downloader;
 
 import common.PageData;
 import common.RetryLogic;
+import multicast.ReliableMulticast;
 import queue.IQueue;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -25,12 +26,14 @@ public class Downloader implements IDownloader {
 
     private IQueue queue;
     private List<IBarrel> barrels = new ArrayList<>();
+    private ReliableMulticast multicast;
 
     public Downloader(IQueue queue) {
         super();
         this.queue = queue;
         this.id = (int) (ProcessHandle.current().pid() * 10 + nextId++);
         discoverBarrels();
+        this.multicast = new ReliableMulticast(3, 2000);
     }
 
     @Override
@@ -69,27 +72,26 @@ public class Downloader implements IDownloader {
     private void sendToBarrels(PageData data) throws RemoteException {
         if (barrels.isEmpty()) {
             System.err.println("Nenhum Barrel disponível, URL será re-adicionado à Queue.");
-            try {
-                safeAddURL(data.getUrl());
-            } catch (Exception e) {
-                System.err.println("Erro ao re-adicionar URL à Queue: " + e.getMessage());
-            }
+            safeAddURL(data.getUrl());
             return;
         }
 
-        System.out.println("\n [Downloader" + id + "] - A enviar página para os Barrels...");
+        System.out.println("\n[Downloader" + id + "] - A enviar página para os Barrels (via multicast lógico)...");
         System.out.println("URL: " + data.getUrl());
         System.out.println("Título: " + data.getTitle());
         System.out.println("Palavras: " + data.getWords().size());
         System.out.println("Links encontrados: " + data.getOutgoingLinks().size());
 
-        for (IBarrel barrel : barrels) {
-            try {
-                barrel.storePage(data);
-                System.out.println("[Downloader" + id +"] - Enviado com sucesso para " + barrel);
-            } catch (Exception e) {
-                System.err.println("[Downloader" + id + "] - Falha ao enviar para um Barrel: " + e.getMessage());
-            }
+        List<IBarrel> failedBarrels = multicast.multicastToBarrels(barrels, data);
+
+        if (!failedBarrels.isEmpty()) {
+            barrels.removeAll(failedBarrels);
+            System.err.println("[Downloader" + id + "] - Removidos " + failedBarrels.size()
+                    + " barrels inativos da lista. Barrels ativos: " + barrels.size());
+        }
+
+        if (barrels.isEmpty()) {
+            System.err.println("[Downloader" + id + "] - Todos os barrels estão inativos!");
         }
     }
 
