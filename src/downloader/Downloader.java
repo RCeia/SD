@@ -1,6 +1,7 @@
 package downloader;
 
 import common.PageData;
+import common.RetryLogic;
 import queue.IQueue;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -38,11 +39,38 @@ public class Downloader implements IDownloader {
         download(url);
     }
 
+    private void safeAddURL(String url) {
+        try {
+            RetryLogic.executeWithRetry(3, 2000, this::reconnectQueue,
+                    () -> {
+                        queue.addURL(url);
+                        return null;
+                    }
+            );
+        } catch (Exception e) {
+            System.err.println("[Downloader" + id + "] - Falha permanente ao adicionar URL à Queue: " + e.getMessage());
+        }
+    }
+
+    private void safeAddURLs(List<String> urls) {
+        try {
+            RetryLogic.executeWithRetry(3, 2000, this::reconnectQueue,
+                    () -> {
+                        queue.addURLs(urls);
+                        return null;
+                    }
+            );
+        } catch (Exception e) {
+            System.err.println("[Downloader" + id + "] - Falha permanente ao adicionar múltiplos URLs à Queue: " + e.getMessage());
+        }
+    }
+
+
     private void sendToBarrels(PageData data) throws RemoteException {
         if (barrels.isEmpty()) {
             System.err.println("Nenhum Barrel disponível, URL será re-adicionado à Queue.");
             try {
-                queue.addURL(data.getUrl());
+                safeAddURL(data.getUrl());
             } catch (Exception e) {
                 System.err.println("Erro ao re-adicionar URL à Queue: " + e.getMessage());
             }
@@ -65,25 +93,89 @@ public class Downloader implements IDownloader {
         }
     }
 
-    @Override
-    public void notifyFinished() throws RemoteException{
-        System.out.println("[Downloader" + id + "] - Download finished, notifying Queue...");
+    private boolean reconnectQueue() {
         try {
-            queue.notifyDownloaderAvailable(this);
+            System.out.println("[Downloader" + id + "] - Tentando reconectar à Queue...");
+            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
+            IQueue newQueue = (IQueue) registry.lookup("URLQueueInterface");
+            this.queue = newQueue;
+            System.out.println("[Downloader" + id + "] - Reconectado à Queue com sucesso!");
+            return true;
         } catch (Exception e) {
-            System.err.println("Erro ao notificar Queue: " + e.getMessage());
+            System.err.println("[Downloader" + id + "] - Falha ao reconectar à Queue: " + e.getMessage());
+            return false;
+        }
+    }
+
+    @Override
+    public void notifyFinished() throws RemoteException {
+        System.out.println("[Downloader" + id + "] - Download finished, notifying Queue...");
+
+        try {
+            RetryLogic.executeWithRetry(3, 2000, () ->reconnectQueue(),
+                    () -> {
+                        queue.notifyDownloaderAvailable(this);
+                        return null;
+                    }
+            );
+        } catch (Exception e) {
+            System.err.println("[Downloader" + id + "] - Falha permanente ao notificar Queue: " + e.getMessage());
         }
     }
 
     private void download(String url) {
         new Thread(() -> {
             try {
-                System.out.println("[Downloader" + id + "] - Downloading: " + url);
 
+                if (url.matches("(?i).*\\.(pdf|jpg|jpeg|png|gif|mp4|zip|rar|docx|xlsx|pptx|mp3)$")) {
+                    System.out.println("[Downloader" + id + "] - URL não possui o formato permitido: " + url);
+                    notifyFinished();
+                    return;
+                }
+
+                if (!barrels.isEmpty()) {
+                    try {
+                        boolean alreadyVisited = barrels.getFirst().isUrlInBarrel(url); // callback remoto
+
+                        if (alreadyVisited) {
+                            System.out.println("[Downloader" + id + "] - URL já visitado anteriormente: " + url);
+                            notifyFinished();
+                            return;
+                        }
+                    } catch (Exception e) {
+                        System.err.println("[Downloader" + id + "] - Erro ao contactar o Barrel: " + e.getMessage());
+                        System.err.println("[Downloader" + id + "] - URL será re-adicionado à Queue: " + url);
+
+                        try {
+                            safeAddURL(url);
+                        } catch (Exception ex) {
+                            System.err.println("[Downloader" + id + "] - Falha ao re-adicionar URL à Queue: " + ex.getMessage());
+                        }
+                        notifyFinished();
+                        return;
+                    }
+                } else {
+                    System.err.println("[Downloader" + id + "] - Nenhum Barrel disponível para verificar histórico!");
+                    try {
+                        safeAddURL(url);
+                    } catch (Exception ex) {
+                        System.err.println("[Downloader" + id + "] - Falha ao re-adicionar URL à Queue: " + ex.getMessage());
+                    }
+                    notifyFinished();
+                    return;
+                }
+
+                System.out.println("[Downloader" + id + "] - Downloading: " + url);
                 Document doc = Jsoup.connect(url).get();
 
                 String title = doc.title();
                 String text = doc.body().text();
+
+                if (text.trim().isEmpty()) {
+                    System.out.println("[Downloader" + id + "] - Página vazia ignorada: " + url);
+                    notifyFinished();
+                    return;
+                }
 
                 List<String> words = List.of(text.split("\\s+"));
 
@@ -98,10 +190,10 @@ public class Downloader implements IDownloader {
                 sendToBarrels(pageData);
 
                 if (outgoingLinks.size() == 1) {
-                    queue.addURL(outgoingLinks.get(0));
+                    safeAddURL(outgoingLinks.get(0));
                     System.out.println("[Downloader" + id + "] - Adicionado 1 novo URL à Queue.");
                 } else if (!outgoingLinks.isEmpty()) {
-                    queue.addURLs(outgoingLinks);
+                    safeAddURLs(outgoingLinks);
                     System.out.println("[Downloader" + id + "] - Adicionados " + outgoingLinks.size() + " novos URLs à Queue.");
                 }
 
@@ -110,7 +202,7 @@ public class Downloader implements IDownloader {
             } catch (Exception e) {
                 System.err.println("[Downloader" + id + "] - Erro ao processar URL: " + url + ". Será re-adicionado à Queue.");
                 try {
-                    queue.addURL(url);
+                    safeAddURL(url);
                 } catch (Exception ex) {
                     ex.printStackTrace();
                 }
