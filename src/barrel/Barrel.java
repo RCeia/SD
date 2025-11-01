@@ -1,6 +1,8 @@
 package barrel;
 
 import common.PageData;
+import downloader.IDownloader;
+
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
@@ -8,79 +10,45 @@ import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
 
 /**
- * Implementação do Storage Barrel.
- * Armazena o índice invertido e replica dados entre barrels.
+ * Implementação de um Barrel (nó de armazenamento).
+ * Cada barrel mantém um índice invertido local e pode sincronizar-se com outros barrels.
  */
 public class Barrel extends UnicastRemoteObject implements IBarrel {
 
     private final Map<String, Set<String>> invertedIndex = new HashMap<>();
     private final Map<String, Set<String>> incomingLinks = new HashMap<>();
-    private final List<IBarrel> replicas = new ArrayList<>();
     private final String name;
+    private boolean isActive = false;
 
     public Barrel(String name) throws RemoteException {
         super();
         this.name = name;
     }
+
+    // -------------------------------------------------------------------------
+    // Acesso aos índices (com cópia profunda)
+    // -------------------------------------------------------------------------
     @Override
     public synchronized Map<String, Set<String>> getInvertedIndex() throws RemoteException {
-        return new HashMap<>(invertedIndex);
+        Map<String, Set<String>> copy = new HashMap<>();
+        for (var entry : invertedIndex.entrySet()) {
+            copy.put(entry.getKey(), new HashSet<>(entry.getValue()));
+        }
+        return copy;
     }
 
     @Override
     public synchronized Map<String, Set<String>> getIncomingLinksMap() throws RemoteException {
-        return new HashMap<>(incomingLinks);
+        Map<String, Set<String>> copy = new HashMap<>();
+        for (var entry : incomingLinks.entrySet()) {
+            copy.put(entry.getKey(), new HashSet<>(entry.getValue()));
+        }
+        return copy;
     }
-
-    // --- Armazenamento e replicação ---
-    @Override
-    public synchronized void storePage(PageData page) throws RemoteException {
-        String url = page.getUrl();
-
-        // Atualizar índice invertido (palavra -> URL)
-        for (String word : page.getWords()) {
-            invertedIndex.computeIfAbsent(word.toLowerCase(), _ -> new HashSet<>()).add(url);
-        }
-
-        // Atualizar mapa de links recebidos (link -> quem aponta para ele)
-        for (String link : page.getOutgoingLinks()) {
-            incomingLinks.computeIfAbsent(link, _ -> new HashSet<>()).add(url);
-        }
-
-        // Difundir para as réplicas
-        for (IBarrel replica : replicas) {
-            try {
-                replica.replicate(page);
-            } catch (Exception e) {
-                System.err.println("⚠️ Falha ao replicar para barrel: " + e.getMessage());
-            }
-        }
-
-        System.out.println("📦 [" + name + "] Página armazenada e replicada: " + url);
-    }
-
-    @Override
-    public synchronized void replicate(PageData page) throws RemoteException {
-        String url = page.getUrl();
-        for (String word : page.getWords()) {
-            invertedIndex.computeIfAbsent(word.toLowerCase(), _ -> new HashSet<>()).add(url);
-        }
-        for (String link : page.getOutgoingLinks()) {
-            incomingLinks.computeIfAbsent(link, _ -> new HashSet<>()).add(url);
-        }
-        System.out.println("🔁 [" + name + "] Réplica recebida de: " + url);
-    }
-
 
     @Override
     public synchronized Set<String> getIncomingLinks(String url) throws RemoteException {
         return incomingLinks.getOrDefault(url, Collections.emptySet());
-    }
-
-    // Optional: readable log when printing barrel in Gateway
-    @Override
-    public String toString() {
-        return "[" + name + "]";
     }
 
     @Override
@@ -88,72 +56,124 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         return invertedIndex.size();
     }
 
+    @Override
+    public boolean isActive() throws RemoteException {
+        return isActive;
+    }
+
+    // -------------------------------------------------------------------------
+    // Armazenamento de páginas
+    // -------------------------------------------------------------------------
+    @Override
+    public synchronized void storePage(PageData page) throws RemoteException {
+        if (!isActive) {
+            System.out.println("⏸️ [" + name + "] Em modo read-only. Ignorando storePage().");
+            return;
+        }
+
+        String url = page.getUrl();
+
+        for (String word : page.getWords()) {
+            invertedIndex.computeIfAbsent(word.toLowerCase(), _ -> new HashSet<>()).add(url);
+        }
+
+        for (String link : page.getOutgoingLinks()) {
+            incomingLinks.computeIfAbsent(link, _ -> new HashSet<>()).add(url);
+        }
+
+        System.out.println("📦 [" + name + "] Página armazenada: " + url);
+    }
+
+    // -------------------------------------------------------------------------
+    // Descoberta e sincronização inicial
+    // -------------------------------------------------------------------------
     private void discoverOtherBarrels(Registry registry) {
         try {
             String[] boundNames = registry.list();
             for (String bound : boundNames) {
                 if (bound.startsWith("Barrel") && !bound.equals(name)) {
                     try {
-                        IBarrel replica = (IBarrel) registry.lookup(bound);
+                        IBarrel other = (IBarrel) registry.lookup(bound);
+                        // Só copia de barrels ativos
+                        if (!other.isActive()) continue;
 
-                        // Testar se o barrel está vivo
-                        try {
-                            replica.getIndexSize(); // método simples de ping
-                            replicas.add(replica);
-                            System.out.println("🔗 [" + name + "] Conectado a réplica viva: " + bound);
+                        System.out.println("🔗 [" + name + "] Encontrado barrel ativo: " + bound);
+                        System.out.println("🔄 [" + name + "] Copiando índice de " + bound + "...");
 
-                            // Sincronizar índices
-                            Map<String, Set<String>> otherIndex = replica.getInvertedIndex();
-                            Map<String, Set<String>> otherIncoming = replica.getIncomingLinksMap();
+                        copyIndexFrom(other);
 
-                            for (Map.Entry<String, Set<String>> entry : otherIndex.entrySet()) {
-                                invertedIndex
-                                        .computeIfAbsent(entry.getKey(), k -> new HashSet<>())
-                                        .addAll(entry.getValue());
-                            }
-
-                            for (Map.Entry<String, Set<String>> entry : otherIncoming.entrySet()) {
-                                incomingLinks
-                                        .computeIfAbsent(entry.getKey(), k -> new HashSet<>())
-                                        .addAll(entry.getValue());
-                            }
-
-                            System.out.println("🔄 [" + name + "] Sincronizado com " + bound);
-
-                        } catch (RemoteException e) {
-                            System.err.println("⚠️ [" + name + "] Barrel " + bound + " inativo, ignorado.");
-                        }
-
-                    } catch (Exception e) {
-                        System.err.println("⚠️ [" + name + "] Falha ao ligar a " + bound + ": " + e.getMessage());
+                        isActive = true;
+                        System.out.println("✅ [" + name + "] Sincronização concluída. Agora ativo!");
+                        notifyDownloadersActive(registry);
+                        System.out.println("🚀 [" + name + "] Barrel totalmente operacional e pronto para receber páginas!");
+                        return; // já sincronizou com um barrel ativo
+                    } catch (RemoteException e) {
+                        System.err.println("⚠️ [" + name + "] Barrel " + bound + " inativo, ignorado.");
                     }
                 }
             }
+
+            // Se não encontrou nenhum barrel → é o primeiro
+            System.out.println("🆕 [" + name + "] Primeiro barrel da rede. Marcado como ativo.");
+            isActive = true;
+            notifyDownloadersActive(registry);
+            System.out.println("🚀 [" + name + "] Barrel totalmente operacional e pronto para receber páginas!");
+
         } catch (Exception e) {
             System.err.println("⚠️ [" + name + "] Erro na autodescoberta: " + e.getMessage());
         }
     }
 
+    private synchronized void copyIndexFrom(IBarrel barrel) throws RemoteException {
+        try {
+            Map<String, Set<String>> otherIndex = barrel.getInvertedIndex();
+            Map<String, Set<String>> otherIncoming = barrel.getIncomingLinksMap();
 
-    public synchronized void printStoredLinks() {
-        System.out.println("\n===== [" + name + "] LINKS NO ÍNDICE INVERTIDO =====");
-        for (Map.Entry<String, Set<String>> entry : invertedIndex.entrySet()) {
-            System.out.println("Palavra: " + entry.getKey());
-            for (String url : entry.getValue()) {
-                System.out.println("  - " + url);
+            for (Map.Entry<String, Set<String>> entry : otherIndex.entrySet()) {
+                invertedIndex.merge(entry.getKey(), entry.getValue(), (a, b) -> {
+                    a.addAll(b);
+                    return a;
+                });
             }
-        }
 
-        System.out.println("\n===== [" + name + "] LINKS RECEBIDOS (incomingLinks) =====");
-        for (Map.Entry<String, Set<String>> entry : incomingLinks.entrySet()) {
-            System.out.println("URL: " + entry.getKey() + " <- apontado por:");
-            for (String origin : entry.getValue()) {
-                System.out.println("  - " + origin);
+            for (Map.Entry<String, Set<String>> entry : otherIncoming.entrySet()) {
+                incomingLinks.merge(entry.getKey(), entry.getValue(), (a, b) -> {
+                    a.addAll(b);
+                    return a;
+                });
             }
-        }
 
-        System.out.println("=============================================\n");
+        } catch (RemoteException e) {
+            System.err.println("⚠️ [" + name + "] Falha durante cópia de índice: " + e.getMessage());
+            throw e;
+        }
     }
+
+    // -------------------------------------------------------------------------
+    // Notificação de downloaders
+    // -------------------------------------------------------------------------
+    private void notifyDownloadersActive(Registry registry) {
+        try {
+            String[] boundNames = registry.list();
+            for (String bound : boundNames) {
+                if (bound.startsWith("Downloader")) {
+                    try {
+                        IDownloader d = (IDownloader) registry.lookup(bound);
+                        d.addBarrel(this); // callback remoto
+                        System.out.println("📣 [" + name + "] Notificado " + bound + " sobre novo barrel ativo.");
+                    } catch (Exception e) {
+                        System.err.println("⚠️ [" + name + "] Falha ao notificar " + bound + ": " + e.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("⚠️ [" + name + "] Erro ao notificar downloaders: " + e.getMessage());
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Pesquisa e utilitários
+    // -------------------------------------------------------------------------
     @Override
     public synchronized Map<String, String> search(List<String> terms) throws RemoteException {
         Map<String, String> results = new LinkedHashMap<>();
@@ -175,14 +195,41 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
                 return true;
             }
         }
-
         return false;
     }
 
-    // --- Main ---
+    public synchronized void printStoredLinks() {
+        System.out.println("\n===== [" + name + "] LINKS NO ÍNDICE INVERTIDO =====");
+        for (Map.Entry<String, Set<String>> entry : invertedIndex.entrySet()) {
+            System.out.println("Palavra: " + entry.getKey());
+            for (String url : entry.getValue()) {
+                System.out.println("  - " + url);
+            }
+        }
+
+        System.out.println("\n===== [" + name + "] LINKS RECEBIDOS (incomingLinks) =====");
+        for (Map.Entry<String, Set<String>> entry : incomingLinks.entrySet()) {
+            System.out.println("URL: " + entry.getKey() + " <- apontado por:");
+            for (String origin : entry.getValue()) {
+                System.out.println("  - " + origin);
+            }
+        }
+
+        System.out.println("=============================================\n");
+    }
+
+    @Override
+    public String toString() {
+        return "[" + name + "]";
+    }
+
+    // -------------------------------------------------------------------------
+    // Main
+    // -------------------------------------------------------------------------
     public static void main(String[] args) {
         try {
-            String name = args.length > 0 ? args[0] : "Barrel" + new Random().nextInt(1000);
+            String name = args.length > 0 ? args[0]
+                    : "Barrel" + (ProcessHandle.current().pid() * 10 + new Random().nextInt(1000));
             Barrel barrel = new Barrel(name);
 
             Registry registry = LocateRegistry.getRegistry("localhost", 1099);
@@ -196,20 +243,41 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
             new Thread(() -> {
                 Scanner sc = new Scanner(System.in);
                 while (true) {
-                    System.out.print("Comando ('show' para listar links): ");
+                    System.out.print("Comando ('show' para listar links, 'exit' para sair): ");
                     String cmd = sc.nextLine().trim();
+
                     if (cmd.equalsIgnoreCase("show")) {
-                        barrel.printStoredLinks();
+                        barrel.printStoredLinks(); // continua a mostrar os links armazenados
+
+                        try {
+                            int invertedSize = barrel.getInvertedIndex().size();
+                            int incomingSize = barrel.getIncomingLinksMap().size();
+                            System.out.println("\n📊 [Resumo do índice]");
+                            System.out.println(" - Entradas no invertedIndex : " + invertedSize);
+                            System.out.println(" - Entradas em incomingLinks : " + incomingSize);
+                            System.out.println(" - Total combinado            : " + (invertedSize + incomingSize));
+                        } catch (Exception e) {
+                            System.err.println("⚠️ Erro ao obter estatísticas do índice: " + e.getMessage());
+                        }
+
                     } else if (cmd.equalsIgnoreCase("exit")) {
-                        System.out.println("🛑 Encerrando " + name + "...");
+                        try {
+                            registry.unbind(name);
+                            UnicastRemoteObject.unexportObject(barrel, true);
+                            System.out.println("🛑 [" + name + "] Barrel removido do registry e encerrado.");
+                        } catch (Exception ex) {
+                            System.err.println("⚠️ [" + name + "] Erro ao encerrar: " + ex.getMessage());
+                        }
                         System.exit(0);
+
                     } else {
                         System.out.println("❓ Comando desconhecido. Use 'show' ou 'exit'.");
                     }
                 }
             }).start();
 
-            // Fica ativo indefinidamente
+
+            // Mantém o processo vivo
             synchronized (barrel) {
                 barrel.wait();
             }

@@ -27,20 +27,31 @@ public class Downloader implements IDownloader {
     private IQueue queue;
     private List<IBarrel> barrels = new ArrayList<>();
     private ReliableMulticast multicast;
+    private final Object barrelLock = new Object();
 
     public Downloader(IQueue queue) {
         super();
         this.queue = queue;
         this.id = (int) (ProcessHandle.current().pid() * 10 + nextId++);
-        discoverBarrels();
-        this.multicast = new ReliableMulticast(3, 2000);
+        discoverBarrels(); // Ver se já existem barrels quando o downlaoder é iniciado
+        this.multicast = new ReliableMulticast(3, 2000, 10, 2); // 3 tentativas, 2000ms de timeout, 10 threads, fator de backoff 2
     }
 
     @Override
-    public void takeURL(String url) throws RemoteException{
+    public void takeURL(String url) throws RemoteException {
+        synchronized (barrelLock) {
+            while (barrels.isEmpty()) {
+                System.out.println("[Downloader" + id + "] - Nenhum barrel ativo. Aguardando...");
+                try {
+                    barrelLock.wait(); // Espera até ser notificado de um barrel novo
+                } catch (InterruptedException ignored) {}
+            }
+        }
+
         System.out.println("[Downloader" + id + "] - Recebi URL para download: " + url);
         download(url);
     }
+
 
     private void safeAddURL(String url) {
         try {
@@ -70,8 +81,11 @@ public class Downloader implements IDownloader {
 
 
     private void sendToBarrels(PageData data) throws RemoteException {
+        // Verifica quais barrels ainda estão ativos
+
+
         if (barrels.isEmpty()) {
-            System.err.println("Nenhum Barrel disponível, URL será re-adicionado à Queue.");
+            System.err.println("[Downloader" + id + "] - Nenhum Barrel ativo disponível. URL será re-adicionado à Queue.");
             safeAddURL(data.getUrl());
             return;
         }
@@ -137,34 +151,20 @@ public class Downloader implements IDownloader {
 
                 if (!barrels.isEmpty()) {
                     try {
-                        boolean alreadyVisited = barrels.getFirst().isUrlInBarrel(url); // callback remoto
+                        boolean alreadyVisited = barrels.getFirst().isUrlInBarrel(url);
 
                         if (alreadyVisited) {
                             System.out.println("[Downloader" + id + "] - URL já visitado anteriormente: " + url);
                             notifyFinished();
                             return;
                         }
+
                     } catch (Exception e) {
                         System.err.println("[Downloader" + id + "] - Erro ao contactar o Barrel: " + e.getMessage());
-                        System.err.println("[Downloader" + id + "] - URL será re-adicionado à Queue: " + url);
-
-                        try {
-                            safeAddURL(url);
-                        } catch (Exception ex) {
-                            System.err.println("[Downloader" + id + "] - Falha ao re-adicionar URL à Queue: " + ex.getMessage());
-                        }
+                        safeAddURL(url);
                         notifyFinished();
                         return;
                     }
-                } else {
-                    System.err.println("[Downloader" + id + "] - Nenhum Barrel disponível para verificar histórico!");
-                    try {
-                        safeAddURL(url);
-                    } catch (Exception ex) {
-                        System.err.println("[Downloader" + id + "] - Falha ao re-adicionar URL à Queue: " + ex.getMessage());
-                    }
-                    notifyFinished();
-                    return;
                 }
 
                 System.out.println("[Downloader" + id + "] - Downloading: " + url);
@@ -192,7 +192,7 @@ public class Downloader implements IDownloader {
                 sendToBarrels(pageData);
 
                 if (outgoingLinks.size() == 1) {
-                    safeAddURL(outgoingLinks.get(0));
+                    safeAddURL(outgoingLinks.getFirst());
                     System.out.println("[Downloader" + id + "] - Adicionado 1 novo URL à Queue.");
                 } else if (!outgoingLinks.isEmpty()) {
                     safeAddURLs(outgoingLinks);
@@ -217,20 +217,51 @@ public class Downloader implements IDownloader {
             Registry registry = LocateRegistry.getRegistry("localhost", 1099);
             String[] boundNames = registry.list();
 
+            List<IBarrel> discovered = new ArrayList<>();
+
             for (String bound : boundNames) {
                 if (bound.startsWith("Barrel")) {
-                    IBarrel barrel = (IBarrel) registry.lookup(bound);
-                    barrels.add(barrel);
-                    System.out.println("Ligado ao " + bound);
+                    try {
+                        IBarrel barrel = (IBarrel) registry.lookup(bound);
+                        if (barrel.isActive()) {
+                            discovered.add(barrel);
+                            System.out.println("[Downloader" + id + "] - Ligado a " + bound + " (ativo).");
+                        } else {
+                            System.out.println("[Downloader" + id + "] - Ignorado " + bound + " (inativo).");
+                        }
+                    } catch (RemoteException e) {
+                        System.err.println("[Downloader" + id + "] - Falha ao contactar " + bound + ": " + e.getMessage());
+                    }
                 }
             }
 
+            barrels = discovered;
+
             if (barrels.isEmpty()) {
-                System.out.println("Nenhum Barrel encontrado no RMI Registry!");
+                System.out.println("[Downloader" + id + "] - Nenhum Barrel ativo encontrado. Aguardando callback...");
+            } else {
+                System.out.println("[Downloader" + id + "] - Barrels ativos encontrados: " + barrels.size());
             }
 
         } catch (Exception e) {
-            System.err.println("Erro na descoberta de Barrels: " + e.getMessage());
+            System.err.println("[Downloader" + id + "] - Erro na descoberta de Barrels: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void addBarrel(IBarrel newBarrel) throws RemoteException {
+        synchronized (barrelLock) {
+            try {
+                if (newBarrel.isActive() && !barrels.contains(newBarrel)) {
+                    barrels.add(newBarrel);
+                    System.out.println("[Downloader" + id + "] - Novo barrel ativo registado dinamicamente: " + newBarrel);
+                    barrelLock.notifyAll(); // acorda threads que estavam à espera
+                } else if (!newBarrel.isActive()) {
+                    System.out.println("[Downloader" + id + "] - Barrel recebido mas ainda inativo: " + newBarrel);
+                }
+            } catch (Exception e) {
+                System.err.println("[Downloader" + id + "] - Erro ao validar barrel no callback: " + e.getMessage());
+            }
         }
     }
 
@@ -246,8 +277,13 @@ public class Downloader implements IDownloader {
             Downloader downloader = new Downloader(queue);
             IDownloader stub = (IDownloader) UnicastRemoteObject.exportObject(downloader, 0);
 
+            String downloaderName = "Downloader" + downloader.id;
+            registry.rebind(downloaderName, stub);
+            System.out.println("[Downloader" + downloader.id + "] - Registado no RMI Registry como '" + downloaderName + "'.");
+
             queue.registerDownloader(stub, downloader.id);
-            System.out.println("[Downloader" + downloader.id + "] - Registado e pronto para receber URLs.");
+            System.out.println("[Downloader" + downloader.id + "] - Registado na Queue e pronto para receber URLs.");
+
 
             synchronized (Downloader.class) {
                 Downloader.class.wait();

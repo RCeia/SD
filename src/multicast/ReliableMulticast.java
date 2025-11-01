@@ -12,16 +12,19 @@ public class ReliableMulticast {
 
     private final int maxRetries;
     private final int ackTimeoutMs;
-    private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final ExecutorService executor;
+    private final int backoffFactor; // Backoff exponencial
 
-    public ReliableMulticast(int maxRetries, int ackTimeoutMs) {
+    public ReliableMulticast(int maxRetries, int ackTimeoutMs, int maxThreads, int backoffFactor) {
         this.maxRetries = maxRetries;
         this.ackTimeoutMs = ackTimeoutMs;
+        this.executor = Executors.newFixedThreadPool(maxThreads); // Controle de threads
+        this.backoffFactor = backoffFactor;
     }
 
     public List<IBarrel> multicastToBarrels(List<IBarrel> barrels, PageData data) {
         if (barrels == null || barrels.isEmpty()) {
-            System.err.println("[MulticastManager] Nenhum barrel disponível!");
+            System.err.println("[Multicast] Nenhum barrel disponível!");
             return new ArrayList<>();
         }
 
@@ -30,8 +33,7 @@ public class ReliableMulticast {
 
         while (!pending.isEmpty() && attempt < maxRetries) {
             attempt++;
-            System.out.println("[MulticastManager] Tentativa " + attempt +
-                    " de envio para " + pending.size() + " barrels...");
+            System.out.println("[Multicast] Tentativa " + attempt + " de envio para " + pending.size() + " barrels...");
 
             List<Future<Boolean>> results = new ArrayList<>();
             for (IBarrel barrel : pending) {
@@ -40,7 +42,7 @@ public class ReliableMulticast {
                         barrel.storePage(data);
                         return true;
                     } catch (RemoteException e) {
-                        System.err.println("[MulticastManager] Falha no barrel: " + e.getMessage());
+                        System.err.println("[Multicast] Falha no barrel: " + e.getMessage());
                         return false;
                     }
                 }));
@@ -49,10 +51,30 @@ public class ReliableMulticast {
             List<IBarrel> failed = new ArrayList<>();
             for (int i = 0; i < results.size(); i++) {
                 try {
-                    if (!results.get(i).get(ackTimeoutMs, TimeUnit.MILLISECONDS))
+                    // Obtenha o resultado com o tempo de espera configurado
+                    if (!results.get(i).get(ackTimeoutMs, TimeUnit.MILLISECONDS)) {
                         failed.add(pending.get(i));
-                } catch (Exception e) {
+                    }
+                } catch (InterruptedException | TimeoutException e) {
+                    // Adiciona falha por timeout ou interrupção
+                    System.err.println("[Multicast] Timeout ou interrupção para o barrel: " + pending.get(i));
                     failed.add(pending.get(i));
+                } catch (Exception e) {
+                    // Adiciona qualquer outra exceção inesperada
+                    System.err.println("[Multicast] Erro desconhecido no barrel: " + e.getMessage());
+                    failed.add(pending.get(i));
+                }
+            }
+
+            // Backoff exponencial no tempo de espera em cada tentativa
+            if (!failed.isEmpty()) {
+                try {
+                    long backoffTime = (long) Math.pow(backoffFactor, attempt) * ackTimeoutMs;
+                    System.out.println("[Multicast] Aguardando " + backoffTime + "ms antes de nova tentativa.");
+                    Thread.sleep(backoffTime);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();  // Restaura a interrupção
+                    System.err.println("[Multicast] A thread foi interrompida durante o backoff.");
                 }
             }
 
@@ -60,13 +82,12 @@ public class ReliableMulticast {
         }
 
         if (!pending.isEmpty()) {
-            System.err.println("[MulticastManager] Nem todos os barrels confirmaram após "
-                    + maxRetries + " tentativas: " + pending.size() + " falharam.");
+            System.err.println("[Multicast] Nem todos os barrels confirmaram após " + maxRetries + " tentativas: " + pending.size() + " falharam.");
         } else {
-            System.out.println("[MulticastManager] Todos os barrels confirmaram com sucesso.");
+            System.out.println("[Multicast] Todos os barrels confirmaram com sucesso.");
         }
 
-        // devolve a lista dos que falharam definitivamente
+        // Devolve a lista dos barrels que falharam definitivamente
         return pending;
     }
 }
