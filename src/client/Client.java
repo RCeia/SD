@@ -61,7 +61,8 @@ public class Client {
             System.out.println("1 - Indexar URL");
             System.out.println("2 - Pesquisar páginas");
             System.out.println("3 - Consultar links para uma página");
-            System.out.println("4 - Sair");
+            System.out.println("4 - Obter estatísticas do sistema");
+            System.out.println("5 - Sair");
             System.out.print("Opção: ");
 
             int choice = scanner.nextInt();
@@ -83,7 +84,8 @@ public class Client {
                     String url = scanner.nextLine();
                     getIncomingLinks(url);
                 }
-                case 4 -> {
+                case 4 -> getSystemStats();
+                case 5 -> {
                     System.out.println("Saindo...");
                     return;
                 }
@@ -115,11 +117,10 @@ public class Client {
     // Search pages
     public static void searchPages(String searchTerm) {
         try {
-            // Separar os termos digitados por espaços
             List<String> terms = Arrays.asList(searchTerm.trim().split("\\s+"));
 
             if (gateway != null) {
-                Map<String, String> results = gateway.search(terms);  // Chama o Gateway com a lista de palavras
+                Map<String, String> results = gateway.search(terms);
 
                 if (results == null || results.isEmpty()) {
                     System.out.println("Nenhum resultado encontrado.");
@@ -134,7 +135,6 @@ public class Client {
             System.err.println("Erro ao realizar a pesquisa: " + e.getMessage());
         }
     }
-
 
     // Get incoming links
     public static void getIncomingLinks(String url) {
@@ -156,6 +156,21 @@ public class Client {
 
         } catch (Exception e) {
             System.err.println("Erro ao consultar links: " + e.getMessage());
+        }
+    }
+
+    // ⬇️ New method to get statistics from Gateway
+    public static void getSystemStats() {
+        try {
+            String stats = RetryLogic.executeWithRetry(
+                    RETRY_LIMIT,
+                    RETRY_DELAY,
+                    Client::reconnectToGateway,
+                    () -> gateway.getSystemStats()
+            );
+            System.out.println(stats);
+        } catch (Exception e) {
+            System.err.println("Erro ao obter estatísticas: " + e.getMessage());
         }
     }
 

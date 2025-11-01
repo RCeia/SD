@@ -217,11 +217,24 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
 
         System.out.println("=============================================\n");
     }
+    @Override
+    public synchronized String getSystemStats() throws RemoteException {
+        return "=== Estatísticas de " + name + " ===\n" +
+                "Tamanho do índice invertido: " + invertedIndex.size() + "\n" +
+                "Número de entradas em incomingLinks: " + incomingLinks.size() + "\n" +
+                "Total combinado: " + (invertedIndex.size() + incomingLinks.size()) + "\n" +
+                "Estado: " + (isActive ? "Ativo" : "Inativo") + "\n";
+    }
 
     @Override
     public String toString() {
         return "[" + name + "]";
     }
+    @Override
+    public String getName() throws RemoteException {
+        return name;
+    }
+
 
     // -------------------------------------------------------------------------
     // Main

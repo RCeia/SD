@@ -1,17 +1,14 @@
 package gateway;
 
-import queue.IQueue;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
 
 public interface IGateway extends Remote {
-
     String indexURL(String url) throws RemoteException;
-
-    // Alterado para aceitar múltiplos termos
     Map<String, String> search(List<String> terms) throws RemoteException;
-
     List<String> getIncomingLinks(String url) throws RemoteException;
+    String getSystemStats() throws RemoteException;
+
 }
