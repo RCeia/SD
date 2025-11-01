@@ -9,7 +9,6 @@ import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
 import java.net.ConnectException;
-import java.util.regex.Pattern;
 
 public class Gateway extends UnicastRemoteObject implements IGateway {
 
@@ -49,29 +48,64 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
     }
 
     private IBarrel chooseBarrel() {
-        if (barrels.isEmpty()) {
-            System.err.println("[Gateway] Nenhum Barrel disponível!");
-            return null;
-        }
-
-        List<IBarrel> neverUsed = new ArrayList<>();
-        long oldestTime = Long.MAX_VALUE;
-        IBarrel oldestBarrel = null;
-
-        for (Map.Entry<IBarrel, Long> entry : barrels.entrySet()) {
-            long lastUsed = entry.getValue();
-            if (lastUsed == 0) {
-                neverUsed.add(entry.getKey());
-            } else if (lastUsed < oldestTime) {
-                oldestTime = lastUsed;
-                oldestBarrel = entry.getKey();
+        synchronized (barrels) {
+            if (barrels.isEmpty()) {
+                System.err.println("[Gateway] Nenhum Barrel disponível!");
+                return null;
             }
-        }
 
-        if (!neverUsed.isEmpty()) {
-            return neverUsed.get(random.nextInt(neverUsed.size()));
+            // Verifica se todos os barrels têm tempos médios
+            boolean allHaveStats = responseTimes.values().stream()
+                    .allMatch(list -> list != null && !list.isEmpty());
+
+            if (allHaveStats) {
+                IBarrel bestBarrel = null;
+                double bestAvg = Double.MAX_VALUE;
+
+                for (Map.Entry<IBarrel, List<Long>> entry : responseTimes.entrySet()) {
+                    List<Long> times = entry.getValue();
+                    if (times.isEmpty()) continue;
+                    double avg = times.stream().mapToLong(Long::longValue).average().orElse(Double.MAX_VALUE);
+                    if (avg < bestAvg) {
+                        bestAvg = avg;
+                        bestBarrel = entry.getKey();
+                    }
+                }
+
+                if (bestBarrel != null) {
+                    System.out.println("[Gateway] Barrel escolhido com menor tempo médio: " +
+                            extractBarrelName(bestBarrel) + " (" +
+                            String.format("%.2f", bestAvg) + " ms)");
+                    return bestBarrel;
+                }
+            }
+
+            // Caso contrário, usa round-robin (ou LRU)
+            List<IBarrel> neverUsed = new ArrayList<>();
+            long oldestTime = Long.MAX_VALUE;
+            IBarrel oldestBarrel = null;
+
+            for (Map.Entry<IBarrel, Long> entry : barrels.entrySet()) {
+                long lastUsed = entry.getValue();
+                if (lastUsed == 0) {
+                    neverUsed.add(entry.getKey());
+                } else if (lastUsed < oldestTime) {
+                    oldestTime = lastUsed;
+                    oldestBarrel = entry.getKey();
+                }
+            }
+
+            if (!neverUsed.isEmpty()) {
+                IBarrel chosen = neverUsed.get(random.nextInt(neverUsed.size()));
+                System.out.println("[Gateway] Barrel escolhido aleatoriamente (sem histórico): " +
+                        extractBarrelName(chosen));
+                return chosen;
+            }
+
+            System.out.println("[Gateway] Barrel escolhido por ordem de uso: " +
+                    extractBarrelName(oldestBarrel));
+            return oldestBarrel;
         }
-        return oldestBarrel;
     }
 
     @Override
@@ -90,42 +124,60 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
     public Map<String, String> search(List<String> terms) throws RemoteException {
         System.out.println("[Gateway] Método search chamado com os termos: " + terms);
 
-        IBarrel chosen = chooseBarrel();
-        if (chosen == null) return Map.of("Erro", "Nenhum Barrel disponível");
+        while (!barrels.isEmpty()) {
+            IBarrel chosen = chooseBarrel();
+            if (chosen == null) return Map.of("Erro", "Nenhum Barrel disponível");
 
-        long start = System.currentTimeMillis();
-        try {
-            barrels.put(chosen, System.currentTimeMillis());
-            Map<String, String> result = chosen.search(terms);
-            long elapsed = System.currentTimeMillis() - start;
-            updateInternalStats(chosen, terms, Collections.emptyList(), elapsed);
-            return result;
+            long start = System.currentTimeMillis();
+            try {
+                barrels.put(chosen, System.currentTimeMillis());
+                Map<String, String> result = chosen.search(terms);
+                long elapsed = System.currentTimeMillis() - start;
+                updateInternalStats(chosen, terms, Collections.emptyList(), elapsed);
+                return result;
 
-        } catch (RemoteException e) {
-            System.err.println("[Gateway] Erro ao consultar Barrel: " + e.getMessage());
-            return Map.of("Erro", "Falha ao consultar Barrel: " + e.getMessage());
+            } catch (RemoteException e) {
+                if (isConnectionRefused(e)) {
+                    System.out.println("[Gateway] Barrel inativo removido: " + extractBarrelName(chosen));
+                    barrels.remove(chosen);
+                    responseTimes.remove(chosen);
+                    continue; // tenta outro barrel
+                }
+                return Map.of("Erro", "Falha ao consultar Barrel: " + e.getMessage());
+            }
         }
+
+        return Map.of("Erro", "Nenhum Barrel ativo disponível");
     }
 
     @Override
     public List<String> getIncomingLinks(String url) throws RemoteException {
         System.out.println("[Gateway] Método getIncomingLinks chamado com o URL: " + url);
 
-        IBarrel chosen = chooseBarrel();
-        if (chosen == null) return List.of("Nenhum Barrel disponível");
+        while (!barrels.isEmpty()) {
+            IBarrel chosen = chooseBarrel();
+            if (chosen == null) return List.of("Nenhum Barrel disponível");
 
-        long start = System.currentTimeMillis();
-        try {
-            barrels.put(chosen, System.currentTimeMillis());
-            List<String> links = new ArrayList<>(chosen.getIncomingLinks(url));
-            long elapsed = System.currentTimeMillis() - start;
-            updateInternalStats(chosen, Collections.emptyList(), List.of(url), elapsed);
-            return links;
+            long start = System.currentTimeMillis();
+            try {
+                barrels.put(chosen, System.currentTimeMillis());
+                List<String> links = new ArrayList<>(chosen.getIncomingLinks(url));
+                long elapsed = System.currentTimeMillis() - start;
+                updateInternalStats(chosen, Collections.emptyList(), List.of(url), elapsed);
+                return links;
 
-        } catch (RemoteException e) {
-            System.err.println("[Gateway] Erro ao consultar Barrel: " + e.getMessage());
-            return List.of("Falha ao consultar Barrel: " + e.getMessage());
+            } catch (RemoteException e) {
+                if (isConnectionRefused(e)) {
+                    System.out.println("[Gateway] Barrel inativo removido: " + extractBarrelName(chosen));
+                    barrels.remove(chosen);
+                    responseTimes.remove(chosen);
+                    continue; // tenta outro barrel
+                }
+                return List.of("Falha ao consultar Barrel: " + e.getMessage());
+            }
         }
+
+        return List.of("Nenhum Barrel ativo disponível");
     }
 
     private void updateInternalStats(IBarrel barrel, List<String> terms, List<String> urls, long elapsed) {
@@ -160,14 +212,10 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
 
         for (Map.Entry<IBarrel, Long> entry : barrels.entrySet()) {
             IBarrel barrel = entry.getKey();
-            String barrelName = extractBarrelName(barrel);
 
             try {
                 String stats = barrel.getSystemStats();
-
-                if (stats == null || stats.isEmpty()) {
-                    continue; // ignora se não há estatísticas
-                }
+                if (stats == null || stats.isEmpty()) continue;
 
                 double avg = getAverageResponseTime(barrel);
                 int count = responseTimes.getOrDefault(barrel, List.of()).size();
@@ -181,17 +229,14 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
 
             } catch (RemoteException e) {
                 if (isConnectionRefused(e)) {
-                    // ignora totalmente barrels inativos
-                    continue;
-                } else {
-                    sb.append("[").append(barrelName).append("] -> Erro ao obter estatísticas.\n\n");
+                    System.out.println("[Gateway] Barrel inativo removido (estatísticas): " + extractBarrelName(barrel));
+                    barrels.remove(barrel);
+                    responseTimes.remove(barrel);
                 }
             }
         }
 
-        if (!foundActive) {
-            sb.append("(Nenhum barrel ativo disponível)\n");
-        }
+        if (!foundActive) sb.append("(Nenhum barrel ativo disponível)\n");
 
         return sb.toString();
     }
@@ -222,25 +267,17 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         return false;
     }
 
-    /**
-     * Extrai o nome do Barrel a partir da referência RMI.
-     * Usa a lista do registry em vez do toString().
-     */
     private String extractBarrelName(IBarrel barrel) {
         try {
             Registry registry = LocateRegistry.getRegistry("localhost", 1099);
             for (String name : registry.list()) {
                 try {
-                    if (registry.lookup(name).equals(barrel)) {
-                        return name;
-                    }
+                    if (registry.lookup(name).equals(barrel)) return name;
                 } catch (Exception ignored) {}
             }
         } catch (Exception ignored) {}
         return "BarrelDesconhecido";
     }
-
-
 
     public static void main(String[] args) {
         try {
