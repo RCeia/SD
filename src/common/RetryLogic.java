@@ -37,7 +37,7 @@ public class RetryLogic {
                 return operation.execute(); // Try the remote operation
             } catch (RemoteException e) {
                 attempt++;
-                System.err.println("[RetryLogic] Falha ao executar operação (tentativa " + attempt + "/" + retries + "): " + e.getMessage());
+                System.err.println("[RetryLogic] Falha ao executar operação (tentativa " + attempt + "/" + retries + "): ");
 
                 if (attempt >= retries) {
                     // Try reconnection if provided

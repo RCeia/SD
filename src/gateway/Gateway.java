@@ -47,153 +47,120 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         }
     }
 
+    // Escolhe o barrel com menor tempo médio ou round-robin se não houver dados
     private IBarrel chooseBarrel() {
         synchronized (barrels) {
-            if (barrels.isEmpty()) {
-                System.err.println("[Gateway] Nenhum Barrel disponível!");
-                return null;
-            }
+            if (barrels.isEmpty()) return null;
 
-            // Verifica se todos os barrels têm tempos médios
             boolean allHaveStats = responseTimes.values().stream()
                     .allMatch(list -> list != null && !list.isEmpty());
 
             if (allHaveStats) {
                 IBarrel bestBarrel = null;
                 double bestAvg = Double.MAX_VALUE;
-
                 for (Map.Entry<IBarrel, List<Long>> entry : responseTimes.entrySet()) {
-                    List<Long> times = entry.getValue();
-                    if (times.isEmpty()) continue;
-                    double avg = times.stream().mapToLong(Long::longValue).average().orElse(Double.MAX_VALUE);
+                    double avg = entry.getValue().stream().mapToLong(Long::longValue).average().orElse(Double.MAX_VALUE);
                     if (avg < bestAvg) {
                         bestAvg = avg;
                         bestBarrel = entry.getKey();
                     }
                 }
-
                 if (bestBarrel != null) {
-                    System.out.println("[Gateway] Barrel escolhido com menor tempo médio: " +
-                            extractBarrelName(bestBarrel) + " (" +
-                            String.format("%.2f", bestAvg) + " ms)");
+                    System.out.println("[Gateway] Barrel escolhido (menor tempo médio): " + extractBarrelName(bestBarrel));
                     return bestBarrel;
                 }
             }
 
-            // Caso contrário, usa round-robin (ou LRU)
+            // Escolha round-robin simples
             List<IBarrel> neverUsed = new ArrayList<>();
             long oldestTime = Long.MAX_VALUE;
             IBarrel oldestBarrel = null;
-
             for (Map.Entry<IBarrel, Long> entry : barrels.entrySet()) {
                 long lastUsed = entry.getValue();
-                if (lastUsed == 0) {
-                    neverUsed.add(entry.getKey());
-                } else if (lastUsed < oldestTime) {
+                if (lastUsed == 0) neverUsed.add(entry.getKey());
+                else if (lastUsed < oldestTime) {
                     oldestTime = lastUsed;
                     oldestBarrel = entry.getKey();
                 }
             }
 
-            if (!neverUsed.isEmpty()) {
-                IBarrel chosen = neverUsed.get(random.nextInt(neverUsed.size()));
-                System.out.println("[Gateway] Barrel escolhido aleatoriamente (sem histórico): " +
-                        extractBarrelName(chosen));
-                return chosen;
-            }
-
-            System.out.println("[Gateway] Barrel escolhido por ordem de uso: " +
-                    extractBarrelName(oldestBarrel));
+            if (!neverUsed.isEmpty()) return neverUsed.get(random.nextInt(neverUsed.size()));
             return oldestBarrel;
         }
     }
 
     @Override
     public String indexURL(String url) throws RemoteException {
-        System.out.println("[Gateway] Método indexURL chamado com o URL: " + url);
-
         if (queue != null) {
             queue.addURL(url);
-            return "URL '" + url + "' indexado com sucesso na fila!";
-        } else {
-            return "Erro: Queue não está disponível.";
+            return "URL '" + url + "' indexado com sucesso!";
         }
+        return "Erro: Queue não disponível.";
     }
 
     @Override
     public Map<String, String> search(List<String> terms) throws RemoteException {
-        System.out.println("[Gateway] Método search chamado com os termos: " + terms);
+        synchronized (barrels) {
+            while (!barrels.isEmpty()) {
+                IBarrel chosen = chooseBarrel();
+                if (chosen == null) return Map.of("Erro", "Nenhum Barrel ativo disponível");
 
-        while (!barrels.isEmpty()) {
-            IBarrel chosen = chooseBarrel();
-            if (chosen == null) return Map.of("Erro", "Nenhum Barrel disponível");
+                try {
+                    barrels.put(chosen, System.currentTimeMillis());
+                    long start = System.currentTimeMillis();
 
-            long start = System.currentTimeMillis();
-            try {
-                barrels.put(chosen, System.currentTimeMillis());
-                Map<String, String> result = chosen.search(terms);
-                long elapsed = System.currentTimeMillis() - start;
-                updateInternalStats(chosen, terms, Collections.emptyList(), elapsed);
-                return result;
+                    // Corrige o tipo de retorno (caso o Barrel devolva Set)
+                    Map<String, String> result = new LinkedHashMap<>(chosen.search(terms));
 
-            } catch (RemoteException e) {
-                if (isConnectionRefused(e)) {
-                    System.out.println("[Gateway] Barrel inativo removido: " + extractBarrelName(chosen));
-                    barrels.remove(chosen);
-                    responseTimes.remove(chosen);
-                    continue; // tenta outro barrel
+                    long elapsed = System.currentTimeMillis() - start;
+                    updateInternalStats(chosen, terms, Collections.emptyList(), elapsed);
+                    return result;
+
+                } catch (RemoteException e) {
+                    if (isConnectionRefused(e)) {
+                        System.out.println("[Gateway] Barrel inativo removido: " + extractBarrelName(chosen));
+                        barrels.remove(chosen);
+                        responseTimes.remove(chosen);
+                        continue; // tenta outro sem o cliente saber
+                    }
+                    throw e;
                 }
-                return Map.of("Erro", "Falha ao consultar Barrel: " + e.getMessage());
             }
         }
-
         return Map.of("Erro", "Nenhum Barrel ativo disponível");
     }
 
     @Override
     public List<String> getIncomingLinks(String url) throws RemoteException {
-        System.out.println("[Gateway] Método getIncomingLinks chamado com o URL: " + url);
+        synchronized (barrels) {
+            while (!barrels.isEmpty()) {
+                IBarrel chosen = chooseBarrel();
+                if (chosen == null) return List.of("Nenhum Barrel ativo disponível");
 
-        while (!barrels.isEmpty()) {
-            IBarrel chosen = chooseBarrel();
-            if (chosen == null) return List.of("Nenhum Barrel disponível");
+                try {
+                    barrels.put(chosen, System.currentTimeMillis());
+                    long start = System.currentTimeMillis();
 
-            long start = System.currentTimeMillis();
-            try {
-                barrels.put(chosen, System.currentTimeMillis());
-                List<String> links = new ArrayList<>(chosen.getIncomingLinks(url));
-                long elapsed = System.currentTimeMillis() - start;
-                updateInternalStats(chosen, Collections.emptyList(), List.of(url), elapsed);
-                return links;
+                    // Corrige caso o retorno seja Set<String>
+                    Collection<String> rawLinks = chosen.getIncomingLinks(url);
+                    List<String> links = new ArrayList<>(rawLinks);
 
-            } catch (RemoteException e) {
-                if (isConnectionRefused(e)) {
-                    System.out.println("[Gateway] Barrel inativo removido: " + extractBarrelName(chosen));
-                    barrels.remove(chosen);
-                    responseTimes.remove(chosen);
-                    continue; // tenta outro barrel
+                    long elapsed = System.currentTimeMillis() - start;
+                    updateInternalStats(chosen, Collections.emptyList(), List.of(url), elapsed);
+                    return links;
+
+                } catch (RemoteException e) {
+                    if (isConnectionRefused(e)) {
+                        System.out.println("[Gateway] Barrel inativo removido: " + extractBarrelName(chosen));
+                        barrels.remove(chosen);
+                        responseTimes.remove(chosen);
+                        continue;
+                    }
+                    throw e;
                 }
-                return List.of("Falha ao consultar Barrel: " + e.getMessage());
             }
         }
-
         return List.of("Nenhum Barrel ativo disponível");
-    }
-
-    private void updateInternalStats(IBarrel barrel, List<String> terms, List<String> urls, long elapsed) {
-        synchronized (termFrequency) {
-            for (String term : terms) {
-                termFrequency.put(term, termFrequency.getOrDefault(term, 0) + 1);
-            }
-        }
-        synchronized (urlFrequency) {
-            for (String url : urls) {
-                urlFrequency.put(url, urlFrequency.getOrDefault(url, 0) + 1);
-            }
-        }
-        synchronized (responseTimes) {
-            responseTimes.computeIfAbsent(barrel, k -> new ArrayList<>()).add(elapsed);
-        }
     }
 
     @Override
@@ -208,37 +175,42 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
 
         sb.append("\n=== Estatísticas de Cada Barrel (Ativos) ===\n\n");
 
-        boolean foundActive = false;
+        boolean found = false;
+        synchronized (barrels) {
+            List<IBarrel> toRemove = new ArrayList<>();
+            for (IBarrel barrel : barrels.keySet()) {
+                try {
+                    String stats = barrel.getSystemStats();
+                    if (stats == null || stats.isEmpty()) continue;
 
-        for (Map.Entry<IBarrel, Long> entry : barrels.entrySet()) {
-            IBarrel barrel = entry.getKey();
+                    double avg = getAverageResponseTime(barrel);
+                    int count = responseTimes.getOrDefault(barrel, List.of()).size();
 
-            try {
-                String stats = barrel.getSystemStats();
-                if (stats == null || stats.isEmpty()) continue;
+                    sb.append(stats.trim()).append("\n")
+                            .append("Tempo médio de resposta: ")
+                            .append(String.format("%.2f ms (baseado em %d consultas)", avg, count))
+                            .append("\n\n");
+                    found = true;
 
-                double avg = getAverageResponseTime(barrel);
-                int count = responseTimes.getOrDefault(barrel, List.of()).size();
-
-                sb.append(stats.trim()).append("\n")
-                        .append("Tempo médio de resposta: ")
-                        .append(String.format("%.2f ms (baseado em %d consultas)", avg, count))
-                        .append("\n\n");
-
-                foundActive = true;
-
-            } catch (RemoteException e) {
-                if (isConnectionRefused(e)) {
-                    System.out.println("[Gateway] Barrel inativo removido (estatísticas): " + extractBarrelName(barrel));
-                    barrels.remove(barrel);
-                    responseTimes.remove(barrel);
+                } catch (RemoteException e) {
+                    if (isConnectionRefused(e)) toRemove.add(barrel);
                 }
+            }
+            for (IBarrel b : toRemove) {
+                System.out.println("[Gateway] Barrel inativo removido (estatísticas): " + extractBarrelName(b));
+                barrels.remove(b);
+                responseTimes.remove(b);
             }
         }
 
-        if (!foundActive) sb.append("(Nenhum barrel ativo disponível)\n");
-
+        if (!found) sb.append("(Nenhum barrel ativo disponível)\n");
         return sb.toString();
+    }
+
+    private void updateInternalStats(IBarrel barrel, List<String> terms, List<String> urls, long elapsed) {
+        for (String t : terms) termFrequency.put(t, termFrequency.getOrDefault(t, 0) + 1);
+        for (String u : urls) urlFrequency.put(u, urlFrequency.getOrDefault(u, 0) + 1);
+        responseTimes.computeIfAbsent(barrel, k -> new ArrayList<>()).add(elapsed);
     }
 
     private void printTop10(Map<String, Integer> map, StringBuilder sb) {
