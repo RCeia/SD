@@ -38,9 +38,10 @@ public class Downloader implements IDownloader {
     private IAdaptiveStopWords adaptiveStopWords;
     private final Tokenizer tokenizer = new Tokenizer();
     // Limiar de 70% para uma palavra ser considerada stop word
-    private static final double STOPWORD_THRESHOLD = 0.8;
+    private static final double STOPWORD_THRESHOLD = 0.7;
     // Cache local com as stopwods para evitar chamadas RMI a cada download
     private Set<String> localStopWordsCache = new HashSet<>();
+    private int downloadCountSinceCacheUpdate = 0;
     // ======================================================================
 
     public Downloader(IQueue queue, String registryHost, int registryPort) {
@@ -202,10 +203,11 @@ public class Downloader implements IDownloader {
                 adaptiveStopWords.processDoc(url, uniqueWords);
 
                 // Atualizar cache de stop words
-                System.out.println("[Downloader" + id + "] - A atualizar cache de stop words...");
-                localStopWordsCache = adaptiveStopWords.getStopWords(STOPWORD_THRESHOLD);
-                System.out.println("[Downloader" + id + "] - Cache atualizado. " + localStopWordsCache.size() + " stop words.");
-                System.out.println("Stop words: " + localStopWordsCache);
+                if (downloadCountSinceCacheUpdate++ % 10 == 0) {
+                    System.out.println("[Downloader" + id + "] - A atualizar cache de stop words...");
+                    localStopWordsCache = adaptiveStopWords.getStopWords(STOPWORD_THRESHOLD);
+                    System.out.println("[Downloader" + id + "] - Cache atualizado. " + localStopWordsCache.size() + " stop words.");
+                }
 
                 // Filtrar as palavras
                 List<String> filteredWords = allWords.stream()
