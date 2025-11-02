@@ -23,15 +23,19 @@ import java.util.ArrayList;
 public class Downloader implements IDownloader {
     private static int nextId = 1;
     private final int id;
+    private final String registryHost;
+    private final int registryPort;
 
     private IQueue queue;
     private List<IBarrel> barrels = new ArrayList<>();
     private ReliableMulticast multicast;
     private final Object barrelLock = new Object();
 
-    public Downloader(IQueue queue) {
+    public Downloader(IQueue queue, String registryHost, int registryPort) {
         super();
         this.queue = queue;
+        this.registryHost = registryHost;
+        this.registryPort = registryPort;
         this.id = (int) (ProcessHandle.current().pid() * 10 + nextId++);
         discoverBarrels(); // Ver se já existem barrels quando o downlaoder é iniciado
         this.multicast = new ReliableMulticast(3, 2000, 10, 2); // 3 tentativas, 2000ms de timeout, 10 threads, fator de backoff 2
@@ -214,7 +218,7 @@ public class Downloader implements IDownloader {
 
     private void discoverBarrels() {
         try {
-            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
+            Registry registry = LocateRegistry.getRegistry(registryHost, registryPort);
             String[] boundNames = registry.list();
 
             List<IBarrel> discovered = new ArrayList<>();
@@ -271,10 +275,12 @@ public class Downloader implements IDownloader {
             String serverIP = args.length > 0 ? args[0] : "localhost";
             int port = args.length > 1 ? Integer.parseInt(args[1]) : 1099;
 
+            System.setProperty("java.rmi.server.hostname", java.net.InetAddress.getLocalHost().getHostAddress());
+
             Registry registry = LocateRegistry.getRegistry(serverIP, port);
             IQueue queue = (IQueue) registry.lookup("URLQueueInterface");
 
-            Downloader downloader = new Downloader(queue);
+            Downloader downloader = new Downloader(queue, serverIP, port);
             IDownloader stub = (IDownloader) UnicastRemoteObject.exportObject(downloader, 0);
 
             String downloaderName = "Downloader" + downloader.id;
