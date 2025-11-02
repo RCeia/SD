@@ -1,15 +1,12 @@
 package downloader;
 
-import com.sun.security.jgss.GSSUtil;
 import common.PageData;
+import common.RetryLogic;
+import multicast.ReliableMulticast;
 import queue.IQueue;
-import barrel.IBarrel;
-
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
-import org.jsoup.Connection;
 
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -18,98 +15,164 @@ import java.rmi.server.UnicastRemoteObject;
 
 import java.util.List;
 import java.util.stream.Collectors;
+import barrel.IBarrel;
 import java.util.ArrayList;
-
+import java.net.InetAddress;
 
 public class Downloader implements IDownloader {
     private static int nextId = 1;
-    private final int id;
+    final int id;
+    private final String registryHost;
+    private final int registryPort;
 
     private IQueue queue;
     private List<IBarrel> barrels = new ArrayList<>();
+    private ReliableMulticast multicast;
+    private final Object barrelLock = new Object();
 
-    private Thread preProcessingThread;
-    private Thread processingThread;
-    private Thread sendingThread;
-
-    public Downloader(IQueue queue) {
+    public Downloader(IQueue queue, String registryHost, int registryPort) {
         super();
         this.queue = queue;
+        this.registryHost = registryHost;
+        this.registryPort = registryPort;
         this.id = (int) (ProcessHandle.current().pid() * 10 + nextId++);
-        discoverBarrels();
+        discoverBarrels(); // tenta encontrar barrels logo ao iniciar
+        this.multicast = new ReliableMulticast(3, 2000, 10, 2);
     }
 
     @Override
     public void takeURL(String url) throws RemoteException {
-        System.out.println("[Downloader" + id + "] - Recebi URL para download: " + url);
+        synchronized (barrelLock) {
+            while (barrels.isEmpty()) {
+                System.out.println("[Downloader" + id + "] - Nenhum barrel ativo. Aguardando...");
+                try {
+                    barrelLock.wait();
+                } catch (InterruptedException ignored) {}
+            }
+        }
 
-        if (barrels.getFirst().isUrlInBarrels(url)) {
-            System.out.println("[Downloader" + id + "] - O URL já está no Barrel. " + url);
-            notifyFinished();
-        } else {
-            download(url);
+        System.out.println("[Downloader" + id + "] - Recebi URL para download: " + url);
+        download(url);
+    }
+
+    private void safeAddURL(String url) {
+        try {
+            RetryLogic.executeWithRetry(3, 2000, this::reconnectQueue,
+                    () -> {
+                        queue.addURL(url);
+                        return null;
+                    }
+            );
+        } catch (Exception e) {
+            System.err.println("[Downloader" + id + "] - Falha permanente ao adicionar URL à Queue: " + e.getMessage());
+        }
+    }
+
+    private void safeAddURLs(List<String> urls) {
+        try {
+            RetryLogic.executeWithRetry(3, 2000, this::reconnectQueue,
+                    () -> {
+                        queue.addURLs(urls);
+                        return null;
+                    }
+            );
+        } catch (Exception e) {
+            System.err.println("[Downloader" + id + "] - Falha permanente ao adicionar múltiplos URLs à Queue: " + e.getMessage());
         }
     }
 
     private void sendToBarrels(PageData data) throws RemoteException {
         if (barrels.isEmpty()) {
-            System.err.println("Nenhum Barrel disponível, URL será re-adicionado à Queue.");
-            try {
-                queue.addURL(data.getUrl());
-            } catch (Exception e) {
-                System.err.println("Erro ao re-adicionar URL à Queue: " + e.getMessage());
-            }
+            System.err.println("[Downloader" + id + "] - Nenhum Barrel ativo disponível. URL será re-adicionado à Queue.");
+            safeAddURL(data.getUrl());
             return;
         }
 
-        System.out.println("\n [Downloader" + id + "] - A enviar página para os Barrels...");
+        System.out.println("\n[Downloader" + id + "] - A enviar página para os Barrels (via multicast lógico)...");
         System.out.println("URL: " + data.getUrl());
         System.out.println("Título: " + data.getTitle());
         System.out.println("Palavras: " + data.getWords().size());
         System.out.println("Links encontrados: " + data.getOutgoingLinks().size());
 
-        for (IBarrel barrel : barrels) {
-            try {
-                barrel.storePage(data);
-                System.out.println("[Downloader" + id +"] - Enviado com sucesso para " + barrel);
-            } catch (Exception e) {
-                System.err.println("[Downloader" + id + "] - Falha ao enviar para um Barrel: " + e.getMessage());
-            }
+        List<IBarrel> failedBarrels = multicast.multicastToBarrels(barrels, data);
+
+        if (!failedBarrels.isEmpty()) {
+            barrels.removeAll(failedBarrels);
+            System.err.println("[Downloader" + id + "] - Removidos " + failedBarrels.size()
+                    + " barrels inativos da lista. Barrels ativos: " + barrels.size());
+        }
+    }
+
+    /**
+     * AQUI estava um bug: estavas a fazer sempre getRegistry(registryHost, 1099)
+     * mesmo que o servidor esteja noutra porta.
+     */
+    private boolean reconnectQueue() {
+        try {
+            System.out.println("[Downloader" + id + "] - Tentando reconectar à Queue...");
+            Registry registry = LocateRegistry.getRegistry(registryHost, registryPort);
+            IQueue newQueue = (IQueue) registry.lookup("URLQueueInterface");
+            this.queue = newQueue;
+            System.out.println("[Downloader" + id + "] - Reconectado à Queue com sucesso!");
+            return true;
+        } catch (Exception e) {
+            System.err.println("[Downloader" + id + "] - Falha ao reconectar à Queue: " + e.getMessage());
+            return false;
         }
     }
 
     @Override
-    public void notifyFinished() throws RemoteException{
+    public void notifyFinished() throws RemoteException {
         System.out.println("[Downloader" + id + "] - Download finished, notifying Queue...");
+
         try {
-            queue.notifyDownloaderAvailable(this);
+            RetryLogic.executeWithRetry(3, 2000, this::reconnectQueue,
+                    () -> {
+                        queue.notifyDownloaderAvailable(this);
+                        return null;
+                    }
+            );
         } catch (Exception e) {
-            System.err.println("Erro ao notificar Queue: " + e.getMessage());
+            System.err.println("[Downloader" + id + "] - Falha permanente ao notificar Queue: " + e.getMessage());
         }
     }
 
     private void download(String url) {
         new Thread(() -> {
             try {
-                System.out.println("[Downloader" + id + "] - Downloading: " + url);
-
-                if (!url.toLowerCase().endsWith(".html")) {
-                    System.out.println("[Downloader" + id + "] - Este URL não respeita o formato permitido: " + url);
+                if (url.matches("(?i).*\\.(pdf|jpg|jpeg|png|gif|mp4|zip|rar|docx|xlsx|pptx|mp3)$")) {
+                    System.out.println("[Downloader" + id + "] - URL não possui o formato permitido: " + url);
                     notifyFinished();
                     return;
                 }
 
+                if (!barrels.isEmpty()) {
+                    try {
+                        boolean alreadyVisited = barrels.getFirst().isUrlInBarrel(url);
+                        if (alreadyVisited) {
+                            System.out.println("[Downloader" + id + "] - URL já visitado anteriormente: " + url);
+                            notifyFinished();
+                            return;
+                        }
+                    } catch (Exception e) {
+                        System.err.println("[Downloader" + id + "] - Erro ao contactar o Barrel: " + e.getMessage());
+                        safeAddURL(url);
+                        notifyFinished();
+                        return;
+                    }
+                }
+
+                System.out.println("[Downloader" + id + "] - Downloading: " + url);
                 Document doc = Jsoup.connect(url).get();
 
-
+                String title = doc.title();
                 String text = doc.body().text();
+
                 if (text.trim().isEmpty()) {
-                    System.out.println("[Downloader" + id + "] - A página está vazia ou não contém conteúdo útil: " + url);
+                    System.out.println("[Downloader" + id + "] - Página vazia ignorada: " + url);
                     notifyFinished();
                     return;
                 }
-
-                String title = doc.title();
 
                 List<String> words = List.of(text.split("\\s+"));
 
@@ -124,10 +187,10 @@ public class Downloader implements IDownloader {
                 sendToBarrels(pageData);
 
                 if (outgoingLinks.size() == 1) {
-                    queue.addURL(outgoingLinks.get(0));
+                    safeAddURL(outgoingLinks.getFirst());
                     System.out.println("[Downloader" + id + "] - Adicionado 1 novo URL à Queue.");
                 } else if (!outgoingLinks.isEmpty()) {
-                    queue.addURLs(outgoingLinks);
+                    safeAddURLs(outgoingLinks);
                     System.out.println("[Downloader" + id + "] - Adicionados " + outgoingLinks.size() + " novos URLs à Queue.");
                 }
 
@@ -136,7 +199,7 @@ public class Downloader implements IDownloader {
             } catch (Exception e) {
                 System.err.println("[Downloader" + id + "] - Erro ao processar URL: " + url + ". Será re-adicionado à Queue.");
                 try {
-                    queue.addURL(url);
+                    safeAddURL(url);
                 } catch (Exception ex) {
                     ex.printStackTrace();
                 }
@@ -146,40 +209,92 @@ public class Downloader implements IDownloader {
 
     private void discoverBarrels() {
         try {
-            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
+            Registry registry = LocateRegistry.getRegistry(registryHost, registryPort);
             String[] boundNames = registry.list();
+
+            List<IBarrel> discovered = new ArrayList<>();
 
             for (String bound : boundNames) {
                 if (bound.startsWith("Barrel")) {
-                    IBarrel barrel = (IBarrel) registry.lookup(bound);
-                    barrels.add(barrel);
-                    System.out.println("Ligado ao " + bound);
+                    try {
+                        IBarrel barrel = (IBarrel) registry.lookup(bound);
+                        if (barrel.isActive()) {
+                            discovered.add(barrel);
+                            System.out.println("[Downloader" + id + "] - Ligado a " + bound + " (ativo).");
+                        } else {
+                            System.out.println("[Downloader" + id + "] - Ignorado " + bound + " (inativo).");
+                        }
+                    } catch (RemoteException e) {
+                        System.err.println("[Downloader" + id + "] - Falha ao contactar " + bound + ": " + e.getMessage());
+                    }
                 }
             }
 
+            barrels = discovered;
+
             if (barrels.isEmpty()) {
-                System.out.println("Nenhum Barrel encontrado no RMI Registry!");
+                System.out.println("[Downloader" + id + "] - Nenhum Barrel ativo encontrado. Aguardando callback...");
+            } else {
+                System.out.println("[Downloader" + id + "] - Barrels ativos encontrados: " + barrels.size());
             }
 
         } catch (Exception e) {
-            System.err.println("Erro na descoberta de Barrels: " + e.getMessage());
+            System.err.println("[Downloader" + id + "] - Erro na descoberta de Barrels: " + e.getMessage());
         }
     }
 
+    @Override
+    public void addBarrel(IBarrel newBarrel) throws RemoteException {
+        synchronized (barrelLock) {
+            try {
+                if (newBarrel.isActive() && !barrels.contains(newBarrel)) {
+                    barrels.add(newBarrel);
+                    System.out.println("[Downloader" + id + "] - Novo barrel ativo registado dinamicamente: " + newBarrel);
+                    barrelLock.notifyAll();
+                } else if (!newBarrel.isActive()) {
+                    System.out.println("[Downloader" + id + "] - Barrel recebido mas ainda inativo: " + newBarrel);
+                }
+            } catch (Exception e) {
+                System.err.println("[Downloader" + id + "] - Erro ao validar barrel no callback: " + e.getMessage());
+            }
+        }
+    }
 
     public static void main(String[] args) {
         try {
+            // args:
+            // 0 -> IP do servidor (onde está a Queue)
+            // 1 -> porta do registry do servidor
+            // 2 -> (opcional) IP desta máquina para o RMI anunciar
             String serverIP = args.length > 0 ? args[0] : "localhost";
             int port = args.length > 1 ? Integer.parseInt(args[1]) : 1099;
 
+            // ESTE é o IP que o SERVIDOR vai usar para chegar AQUI
+            String myPublicIP;
+            if (args.length > 2) {
+                myPublicIP = args[2];
+            } else {
+                // último recurso: tenta descobrir
+                myPublicIP = InetAddress.getLocalHost().getHostAddress();
+            }
+
+            System.setProperty("java.rmi.server.hostname", myPublicIP);
+            System.out.println("[INFO] RMI hostname definido como: " + myPublicIP);
+
+            // liga ao registry remoto (o da Queue)
             Registry registry = LocateRegistry.getRegistry(serverIP, port);
             IQueue queue = (IQueue) registry.lookup("URLQueueInterface");
 
-            Downloader downloader = new Downloader(queue);
+            Downloader downloader = new Downloader(queue, serverIP, port);
             IDownloader stub = (IDownloader) UnicastRemoteObject.exportObject(downloader, 0);
 
+            String downloaderName = "Downloader" + downloader.id;
+            // regista o callback deste downloader no registry do servidor
+            System.out.println("[Downloader" + downloader.id + "] - Registado no RMI Registry remoto como '" + downloaderName + "'.");
+
+            // regista-se também na queue
             queue.registerDownloader(stub, downloader.id);
-            System.out.println("[Downloader" + downloader.id + "] - Registado e pronto para receber URLs.");
+            System.out.println("[Downloader" + downloader.id + "] - Registado na Queue e pronto para receber URLs.");
 
             synchronized (Downloader.class) {
                 Downloader.class.wait();

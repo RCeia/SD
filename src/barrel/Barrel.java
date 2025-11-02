@@ -1,104 +1,54 @@
 package barrel;
 
 import common.PageData;
+import downloader.IDownloader;
+
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
+import java.net.InetAddress;
 
 /**
- * Implementação do Storage Barrel.
- * Armazena o índice invertido e replica dados entre barrels.
+ * Implementação de um Barrel (nó de armazenamento).
+ * Cada barrel mantém um índice invertido local e pode sincronizar-se com outros barrels.
  */
 public class Barrel extends UnicastRemoteObject implements IBarrel {
 
     private final Map<String, Set<String>> invertedIndex = new HashMap<>();
     private final Map<String, Set<String>> incomingLinks = new HashMap<>();
-    private final List<IBarrel> replicas = new ArrayList<>();
     private final String name;
+    private boolean isActive = false;
 
     public Barrel(String name) throws RemoteException {
         super();
         this.name = name;
     }
+
+    // -------------------------------------------------------------------------
+    // Acesso aos índices (com cópia profunda)
+    // -------------------------------------------------------------------------
     @Override
     public synchronized Map<String, Set<String>> getInvertedIndex() throws RemoteException {
-        return new HashMap<>(invertedIndex);
+        Map<String, Set<String>> copy = new HashMap<>();
+        for (var entry : invertedIndex.entrySet()) {
+            copy.put(entry.getKey(), new HashSet<>(entry.getValue()));
+        }
+        return copy;
     }
 
     @Override
     public synchronized Map<String, Set<String>> getIncomingLinksMap() throws RemoteException {
-        return new HashMap<>(incomingLinks);
+        Map<String, Set<String>> copy = new HashMap<>();
+        for (var entry : incomingLinks.entrySet()) {
+            copy.put(entry.getKey(), new HashSet<>(entry.getValue()));
+        }
+        return copy;
     }
 
     @Override
-    public synchronized boolean isUrlInBarrels(String url) throws RemoteException {
-        for (Set<String> referringUrls : incomingLinks.values()) {
-            if (referringUrls.contains(url)) {
-                // O URL já foi referenciado, então já foi visitado
-                return true;
-            }
-        }
-        // Se não encontrar o URL, ele não foi visitado
-        return false;
-    }
-
-    // --- Armazenamento e replicação ---
-    @Override
-    public synchronized void storePage(PageData page) throws RemoteException {
-        String url = page.getUrl();
-
-        // Atualizar índice invertido (palavra -> URL)
-        for (String word : page.getWords()) {
-            invertedIndex.computeIfAbsent(word.toLowerCase(), _ -> new HashSet<>()).add(url);
-        }
-
-        // Atualizar mapa de links recebidos (link -> quem aponta para ele)
-        for (String link : page.getOutgoingLinks()) {
-            incomingLinks.computeIfAbsent(link, _ -> new HashSet<>()).add(url);
-        }
-
-        // Difundir para as réplicas
-        for (IBarrel replica : replicas) {
-            try {
-                replica.replicate(page);
-            } catch (Exception e) {
-                System.err.println("Falha ao replicar para barrel: " + e.getMessage());
-            }
-        }
-
-        System.out.println("[" + name + "] Página armazenada e replicada: " + url);
-    }
-
-    @Override
-    public synchronized void replicate(PageData page) throws RemoteException {
-        String url = page.getUrl();
-        for (String word : page.getWords()) {
-            invertedIndex.computeIfAbsent(word.toLowerCase(), _ -> new HashSet<>()).add(url);
-        }
-        for (String link : page.getOutgoingLinks()) {
-            incomingLinks.computeIfAbsent(link, _ -> new HashSet<>()).add(url);
-        }
-        System.out.println("[" + name + "] Réplica recebida de: " + url);
-    }
-
-    // --- Pesquisa e estatísticas ---
-    @Override
-    public Map<String, String> search(List<String> terms) throws RemoteException {
-        Map<String, String> results = new LinkedHashMap<>();
-        for (String term : terms) {
-            Set<String> urls = invertedIndex.get(term.toLowerCase());
-            if (urls != null) {
-                for (String url : urls)
-                    results.put(url, "Contém: " + term);
-            }
-        }
-        return results;
-    }
-
-    @Override
-    public Set<String> getIncomingLinks(String url) throws RemoteException {
+    public synchronized Set<String> getIncomingLinks(String url) throws RemoteException {
         return incomingLinks.getOrDefault(url, Collections.emptySet());
     }
 
@@ -107,52 +57,147 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         return invertedIndex.size();
     }
 
+    @Override
+    public boolean isActive() throws RemoteException {
+        return isActive;
+    }
+
+    // -------------------------------------------------------------------------
+    // Armazenamento de páginas
+    // -------------------------------------------------------------------------
+    @Override
+    public synchronized void storePage(PageData page) throws RemoteException {
+        if (!isActive) {
+            System.out.println("⏸️ [" + name + "] Em modo read-only. Ignorando storePage().");
+            return;
+        }
+
+        String url = page.getUrl();
+
+        for (String word : page.getWords()) {
+            invertedIndex.computeIfAbsent(word.toLowerCase(), _ -> new HashSet<>()).add(url);
+        }
+
+        for (String link : page.getOutgoingLinks()) {
+            incomingLinks.computeIfAbsent(link, _ -> new HashSet<>()).add(url);
+        }
+
+        System.out.println("📦 [" + name + "] Página armazenada: " + url);
+    }
+
+    // -------------------------------------------------------------------------
+    // Descoberta e sincronização inicial
+    // -------------------------------------------------------------------------
     private void discoverOtherBarrels(Registry registry) {
         try {
             String[] boundNames = registry.list();
             for (String bound : boundNames) {
                 if (bound.startsWith("Barrel") && !bound.equals(name)) {
                     try {
-                        IBarrel replica = (IBarrel) registry.lookup(bound);
+                        IBarrel other = (IBarrel) registry.lookup(bound);
+                        // Só copia de barrels ativos
+                        if (!other.isActive()) continue;
 
-                        // Testar se o barrel está vivo
-                        try {
-                            replica.getIndexSize(); // método simples de ping
-                            replicas.add(replica);
-                            System.out.println("[" + name + "] Conectado a réplica viva: " + bound);
+                        System.out.println("🔗 [" + name + "] Encontrado barrel ativo: " + bound);
+                        System.out.println("🔄 [" + name + "] Copiando índice de " + bound + "...");
 
-                            // Sincronizar índices
-                            Map<String, Set<String>> otherIndex = replica.getInvertedIndex();
-                            Map<String, Set<String>> otherIncoming = replica.getIncomingLinksMap();
+                        copyIndexFrom(other);
 
-                            for (Map.Entry<String, Set<String>> entry : otherIndex.entrySet()) {
-                                invertedIndex
-                                        .computeIfAbsent(entry.getKey(), k -> new HashSet<>())
-                                        .addAll(entry.getValue());
-                            }
+                        isActive = true;
+                        System.out.println("✅ [" + name + "] Sincronização concluída. Agora ativo!");
+                        notifyDownloadersActive(registry);
+                        System.out.println("🚀 [" + name + "] Barrel totalmente operacional e pronto para receber páginas!");
+                        return; // já sincronizou com um barrel ativo
+                    } catch (RemoteException e) {
+                        System.err.println("⚠️ [" + name + "] Barrel " + bound + " inativo, ignorado.");
+                    }
+                }
+            }
 
-                            for (Map.Entry<String, Set<String>> entry : otherIncoming.entrySet()) {
-                                incomingLinks
-                                        .computeIfAbsent(entry.getKey(), k -> new HashSet<>())
-                                        .addAll(entry.getValue());
-                            }
+            // Se não encontrou nenhum barrel → é o primeiro
+            System.out.println("🆕 [" + name + "] Primeiro barrel da rede. Marcado como ativo.");
+            isActive = true;
+            notifyDownloadersActive(registry);
+            System.out.println("🚀 [" + name + "] Barrel totalmente operacional e pronto para receber páginas!");
 
-                            System.out.println("[" + name + "] Sincronizado com " + bound);
+        } catch (Exception e) {
+            System.err.println("⚠️ [" + name + "] Erro na autodescoberta: " + e.getMessage());
+        }
+    }
 
-                        } catch (RemoteException e) {
-                            System.err.println("[" + name + "] Barrel " + bound + " inativo, ignorado.");
-                        }
+    private synchronized void copyIndexFrom(IBarrel barrel) throws RemoteException {
+        try {
+            Map<String, Set<String>> otherIndex = barrel.getInvertedIndex();
+            Map<String, Set<String>> otherIncoming = barrel.getIncomingLinksMap();
 
+            for (Map.Entry<String, Set<String>> entry : otherIndex.entrySet()) {
+                invertedIndex.merge(entry.getKey(), entry.getValue(), (a, b) -> {
+                    a.addAll(b);
+                    return a;
+                });
+            }
+
+            for (Map.Entry<String, Set<String>> entry : otherIncoming.entrySet()) {
+                incomingLinks.merge(entry.getKey(), entry.getValue(), (a, b) -> {
+                    a.addAll(b);
+                    return a;
+                });
+            }
+
+        } catch (RemoteException e) {
+            System.err.println("⚠️ [" + name + "] Falha durante cópia de índice: " + e.getMessage());
+            throw e;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Notificação de downloaders
+    // -------------------------------------------------------------------------
+    private void notifyDownloadersActive(Registry registry) {
+        try {
+            String[] boundNames = registry.list();
+            for (String bound : boundNames) {
+                if (bound.startsWith("Downloader")) {
+                    try {
+                        IDownloader d = (IDownloader) registry.lookup(bound);
+                        d.addBarrel(this); // callback remoto
+                        System.out.println("📣 [" + name + "] Notificado " + bound + " sobre novo barrel ativo.");
                     } catch (Exception e) {
-                        System.err.println("[" + name + "] Falha ao ligar a " + bound + ": " + e.getMessage());
+                        System.err.println("⚠️ [" + name + "] Falha ao notificar " + bound + ": " + e.getMessage());
                     }
                 }
             }
         } catch (Exception e) {
-            System.err.println("[" + name + "] Erro na autodescoberta: " + e.getMessage());
+            System.err.println("⚠️ [" + name + "] Erro ao notificar downloaders: " + e.getMessage());
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Pesquisa e utilitários
+    // -------------------------------------------------------------------------
+    @Override
+    public synchronized Map<String, String> search(List<String> terms) throws RemoteException {
+        Map<String, String> results = new LinkedHashMap<>();
+        for (String term : terms) {
+            Set<String> urls = invertedIndex.get(term.toLowerCase());
+            if (urls != null) {
+                for (String url : urls) {
+                    results.put(url, "Contém: " + term);
+                }
+            }
+        }
+        return results;
+    }
+
+    @Override
+    public synchronized boolean isUrlInBarrel(String url) throws RemoteException {
+        for (Set<String> urls : incomingLinks.values()) {
+            if (urls.contains(url)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     public synchronized void printStoredLinks() {
         System.out.println("\n===== [" + name + "] LINKS NO ÍNDICE INVERTIDO =====");
@@ -174,15 +219,46 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         System.out.println("=============================================\n");
     }
 
-    // --- Main ---
+    @Override
+    public synchronized String getSystemStats() throws RemoteException {
+        return "=== Estatísticas de " + name + " ===\n" +
+                "Tamanho do índice invertido: " + invertedIndex.size() + "\n" +
+                "Número de entradas em incomingLinks: " + incomingLinks.size() + "\n" +
+                "Total combinado: " + (invertedIndex.size() + incomingLinks.size()) + "\n" +
+                "Estado: " + (isActive ? "Ativo" : "Inativo") + "\n";
+    }
+
+    @Override
+    public String toString() {
+        return "[" + name + "]";
+    }
+
+    @Override
+    public String getName() throws RemoteException {
+        return name;
+    }
+
+
+    // -------------------------------------------------------------------------
+    // Main
+    // -------------------------------------------------------------------------
     public static void main(String[] args) {
         try {
-            String name = args.length > 0 ? args[0] : "Barrel" + new Random().nextInt(1000);
-            Barrel barrel = new Barrel(name);
+            // Gera automaticamente o nome do barrel
+            String name = "Barrel" + (ProcessHandle.current().pid() * 10 + new Random().nextInt(1000));
 
-            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
-            registry.rebind(name, barrel);
-            System.out.println("[" + name + "] Registado no RMI Registry.");
+            // Lê IP e porto do Registry com padrão automático
+            String registryHost = args.length > 0 ? args[0] : "localhost";
+            int registryPort = args.length > 1 ? Integer.parseInt(args[1]) : 1099;
+
+            String localIP = InetAddress.getLocalHost().getHostAddress();
+            System.setProperty("java.rmi.server.hostname", localIP);
+            System.out.println("[INFO] RMI hostname definido como: " + localIP);
+
+            Registry registry = LocateRegistry.getRegistry(registryHost, registryPort);
+
+            Barrel barrel = new Barrel(name);
+            System.out.println("✅ [" + name + "] Registado no RMI Registry.");
 
             // Descobrir automaticamente outros barrels
             barrel.discoverOtherBarrels(registry);
@@ -191,20 +267,41 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
             new Thread(() -> {
                 Scanner sc = new Scanner(System.in);
                 while (true) {
-                    System.out.print("Comando ('show' para listar links): ");
+                    System.out.print("Comando ('show' para listar links, 'exit' para sair): ");
                     String cmd = sc.nextLine().trim();
+
                     if (cmd.equalsIgnoreCase("show")) {
-                        barrel.printStoredLinks();
+                        barrel.printStoredLinks(); // continua a mostrar os links armazenados
+
+                        try {
+                            int invertedSize = barrel.getInvertedIndex().size();
+                            int incomingSize = barrel.getIncomingLinksMap().size();
+                            System.out.println("\n📊 [Resumo do índice]");
+                            System.out.println(" - Entradas no invertedIndex : " + invertedSize);
+                            System.out.println(" - Entradas em incomingLinks : " + incomingSize);
+                            System.out.println(" - Total combinado            : " + (invertedSize + incomingSize));
+                        } catch (Exception e) {
+                            System.err.println("⚠️ Erro ao obter estatísticas do índice: " + e.getMessage());
+                        }
+
                     } else if (cmd.equalsIgnoreCase("exit")) {
-                        System.out.println("Encerrando " + name + "...");
+                        try {
+                            registry.unbind(name);
+                            UnicastRemoteObject.unexportObject(barrel, true);
+                            System.out.println("🛑 [" + name + "] Barrel removido do registry e encerrado.");
+                        } catch (Exception ex) {
+                            System.err.println("⚠️ [" + name + "] Erro ao encerrar: " + ex.getMessage());
+                        }
                         System.exit(0);
+
                     } else {
-                        System.out.println("Comando desconhecido. Use 'show' ou 'exit'.");
+                        System.out.println("❓ Comando desconhecido. Use 'show' ou 'exit'.");
                     }
                 }
             }).start();
 
-            // Fica ativo indefinidamente
+
+            // Mantém o processo vivo
             synchronized (barrel) {
                 barrel.wait();
             }
