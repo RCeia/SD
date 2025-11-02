@@ -29,18 +29,19 @@ public class RetryLogic {
      * @throws InterruptedException If the retry delay is interrupted.
      */
     public static <T> T executeWithRetry(int retries, long delay, ReconnectAction reconnect, Operation<T> operation)
-            throws RemoteException, InterruptedException {
+            throws RemoteException {
 
         int attempt = 0;
         while (attempt < retries) {
             try {
-                return operation.execute(); // Try the remote operation
+                return operation.execute();
             } catch (RemoteException e) {
                 attempt++;
-                System.err.println("[RetryLogic] Falha ao executar operação (tentativa " + attempt + "/" + retries + "): ");
+                System.err.println("[RetryLogic] Falha ao executar operação (tentativa "
+                        + attempt + "/" + retries + "): " + e.getMessage());
 
                 if (attempt >= retries) {
-                    // Try reconnection if provided
+                    // Tentativa de reconexão se existir ação
                     if (reconnect != null && reconnect.reconnect()) {
                         System.out.println("[RetryLogic] Reconexão bem-sucedida. Tentando novamente a operação...");
                         return operation.execute();
@@ -49,7 +50,12 @@ public class RetryLogic {
                     }
                 }
 
-                Thread.sleep(delay);
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt(); // preserva estado da thread
+                    throw new RemoteException("Thread interrompida durante retries", ie);
+                }
             }
         }
         return null;

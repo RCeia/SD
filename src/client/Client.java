@@ -194,12 +194,20 @@ public class Client {
 
             System.out.println("\n1 - Próxima página | 2 - Página anterior | 3 - Voltar ao menu");
             System.out.print("Opção: ");
-            int opt = scanner.nextInt();
 
-            if (opt == 1 && end < total) currentPage++;
-            else if (opt == 2 && currentPage > 0) currentPage--;
-            else if (opt == 3) break;
-            else System.out.println("Opção inválida.");
+            String input = scanner.nextLine().trim();
+
+            if (input.equals("1")) {
+                if (end < total) currentPage++;
+                else System.out.println("Não há mais páginas.");
+            } else if (input.equals("2")) {
+                if (currentPage > 0) currentPage--;
+                else System.out.println("Já está na primeira página.");
+            } else if (input.equals("3")) {
+                break; // volta ao menu principal
+            } else {
+                System.out.println("Entrada inválida. Por favor insira 1, 2 ou 3.");
+            }
         }
     }
 

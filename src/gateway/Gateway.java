@@ -2,6 +2,7 @@ package gateway;
 
 import queue.IQueue;
 import barrel.IBarrel;
+import common.RetryLogic;
 
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -87,6 +88,23 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         }
     }
 
+    private boolean tryReconnect(String barrelName) {
+        try {
+            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
+            IBarrel newBarrel = (IBarrel) registry.lookup(barrelName);
+            synchronized (barrels) {
+                barrels.put(newBarrel, 0L);
+                responseTimes.put(newBarrel, new ArrayList<>());
+            }
+            System.out.println("[Gateway] Reconexão bem-sucedida ao " + barrelName);
+            return true;
+        } catch (Exception e) {
+            System.err.println("[Gateway] Falha ao reconectar ao " + barrelName + ": " + e.getMessage());
+            return false;
+        }
+    }
+
+
     @Override
     public String indexURL(String url) throws RemoteException {
         if (queue != null) {
@@ -101,13 +119,19 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         synchronized (barrels) {
             while (!barrels.isEmpty()) {
                 IBarrel chosen = chooseBarrel();
-                if (chosen == null) return Map.of("Erro", "Nenhum Barrel ativo disponível");
+                if (chosen == null) return Map.of("Erro", "Ocorreu um erro na pesquisa");
 
                 try {
                     barrels.put(chosen, System.currentTimeMillis());
                     long start = System.currentTimeMillis();
 
-                    Map<String, String> result = new LinkedHashMap<>(chosen.search(terms));
+                    String barrelName = extractBarrelName(chosen);
+                    Map<String, String> result = RetryLogic.executeWithRetry(
+                            3,                     // 3 tentativas
+                            2000,                  // delay 2 segundos
+                            () -> tryReconnect(barrelName),  // ação de reconexão
+                            () -> chosen.search(terms)       // operação remota
+                    );
 
                     long elapsed = System.currentTimeMillis() - start;
                     updateInternalStats(chosen, terms, Collections.emptyList(), elapsed);
@@ -141,7 +165,14 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
                     barrels.put(chosen, System.currentTimeMillis());
                     long start = System.currentTimeMillis();
 
-                    Collection<String> rawLinks = chosen.getIncomingLinks(url);
+                    String barrelName = extractBarrelName(chosen);
+                    Collection<String> rawLinks = RetryLogic.executeWithRetry(
+                            3,
+                            2000,
+                            () -> tryReconnect(barrelName),
+                            () -> chosen.getIncomingLinks(url)
+                    );
+
                     List<String> links = new ArrayList<>(rawLinks);
 
                     long elapsed = System.currentTimeMillis() - start;
