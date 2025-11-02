@@ -244,12 +244,12 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
     // -------------------------------------------------------------------------
     public static void main(String[] args) {
         try {
-            String name = args.length > 0 ? args[0]
-                    : "Barrel" + (ProcessHandle.current().pid() * 10 + new Random().nextInt(1000));
+            // Gera automaticamente o nome do barrel
+            String name = "Barrel" + (ProcessHandle.current().pid() * 10 + new Random().nextInt(1000));
 
-
-            String registryHost = args.length > 1 ? args[1] : "localhost";
-            int registryPort = args.length > 2 ? Integer.parseInt(args[2]) : 1099;
+            // Lê IP e porto do Registry com padrão automático
+            String registryHost = args.length > 0 ? args[0] : "localhost";
+            int registryPort = args.length > 1 ? Integer.parseInt(args[1]) : 1099;
 
             String localIP = InetAddress.getLocalHost().getHostAddress();
             System.setProperty("java.rmi.server.hostname", localIP);

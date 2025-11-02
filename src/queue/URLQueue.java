@@ -109,7 +109,7 @@ public class URLQueue implements IQueue {
             int port = args.length > 1 ? Integer.parseInt(args[1]) : 1099;
 
             // Define o IP que o RMI vai anunciar aos clientes
-            System.setProperty("java.rmi.server.hostname", InetAddress.getLocalHost().getHostAddress());
+            System.setProperty("java.rmi.server.hostname", hostIP);
 
             // Criar instância da Queue
             URLQueue queue = new URLQueue();
