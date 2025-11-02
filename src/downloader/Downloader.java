@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import barrel.IBarrel;
 import java.util.ArrayList;
+import java.net.InetAddress;
 
 
 public class Downloader implements IDownloader {
@@ -275,7 +276,11 @@ public class Downloader implements IDownloader {
             String serverIP = args.length > 0 ? args[0] : "localhost";
             int port = args.length > 1 ? Integer.parseInt(args[1]) : 1099;
 
-            System.setProperty("java.rmi.server.hostname", java.net.InetAddress.getLocalHost().getHostAddress());
+            // ⚙️ Definir o IP real da máquina na rede (não 127.0.0.1)
+            String localIP = InetAddress.getLocalHost().getHostAddress();
+            System.setProperty("java.rmi.server.hostname", localIP);
+            System.out.println("[INFO] RMI hostname definido como: " + localIP);
+
 
             Registry registry = LocateRegistry.getRegistry(serverIP, port);
             IQueue queue = (IQueue) registry.lookup("URLQueueInterface");
@@ -284,7 +289,7 @@ public class Downloader implements IDownloader {
             IDownloader stub = (IDownloader) UnicastRemoteObject.exportObject(downloader, 0);
 
             String downloaderName = "Downloader" + downloader.id;
-            //registry.rebind(downloaderName, stub);
+            registry.rebind(downloaderName, stub);
             System.out.println("[Downloader" + downloader.id + "] - Registado no RMI Registry como '" + downloaderName + "'.");
 
             queue.registerDownloader(stub, downloader.id);

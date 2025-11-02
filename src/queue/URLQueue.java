@@ -124,7 +124,7 @@ public class URLQueue implements IQueue {
             System.out.println("Queue ready on " + hostIP + ":" + port);
 
             // Adicionar URLs iniciais
-            queue.addURL("https://rceia.github.io/SD/tests/index.html");
+            queue.addURL("https://www.google.com");
 
             // Hook de shutdown para limpar
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {

@@ -250,7 +250,10 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
 
             String registryHost = args.length > 1 ? args[1] : "localhost";
             int registryPort = args.length > 2 ? Integer.parseInt(args[2]) : 1099;
-            System.setProperty("java.rmi.server.hostname", InetAddress.getLocalHost().getHostAddress());
+
+            String localIP = InetAddress.getLocalHost().getHostAddress();
+            System.setProperty("java.rmi.server.hostname", localIP);
+            System.out.println("[INFO] RMI hostname definido como: " + localIP);
 
             Registry registry = LocateRegistry.getRegistry(registryHost, registryPort);
 
