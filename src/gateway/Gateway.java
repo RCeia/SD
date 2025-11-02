@@ -47,7 +47,6 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         }
     }
 
-    // Escolhe o barrel com menor tempo médio ou round-robin se não houver dados
     private IBarrel chooseBarrel() {
         synchronized (barrels) {
             if (barrels.isEmpty()) return null;
@@ -71,7 +70,6 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
                 }
             }
 
-            // Escolha round-robin simples
             List<IBarrel> neverUsed = new ArrayList<>();
             long oldestTime = Long.MAX_VALUE;
             IBarrel oldestBarrel = null;
@@ -109,19 +107,21 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
                     barrels.put(chosen, System.currentTimeMillis());
                     long start = System.currentTimeMillis();
 
-                    // Corrige o tipo de retorno (caso o Barrel devolva Set)
                     Map<String, String> result = new LinkedHashMap<>(chosen.search(terms));
 
                     long elapsed = System.currentTimeMillis() - start;
                     updateInternalStats(chosen, terms, Collections.emptyList(), elapsed);
-                    return result;
+
+                    // ✅ Sort results by importance (number of incoming links)
+                    Map<String, String> sorted = sortByIncomingLinks(result.keySet(), chosen);
+                    return sorted;
 
                 } catch (RemoteException e) {
                     if (isConnectionRefused(e)) {
                         System.out.println("[Gateway] Barrel inativo removido: " + extractBarrelName(chosen));
                         barrels.remove(chosen);
                         responseTimes.remove(chosen);
-                        continue; // tenta outro sem o cliente saber
+                        continue;
                     }
                     throw e;
                 }
@@ -141,12 +141,22 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
                     barrels.put(chosen, System.currentTimeMillis());
                     long start = System.currentTimeMillis();
 
-                    // Corrige caso o retorno seja Set<String>
                     Collection<String> rawLinks = chosen.getIncomingLinks(url);
                     List<String> links = new ArrayList<>(rawLinks);
 
                     long elapsed = System.currentTimeMillis() - start;
                     updateInternalStats(chosen, Collections.emptyList(), List.of(url), elapsed);
+
+                    // ✅ Sort links by importance (descending number of incoming links)
+                    links.sort((a, b) -> {
+                        try {
+                            int countA = chosen.getIncomingLinks(a).size();
+                            int countB = chosen.getIncomingLinks(b).size();
+                            return Integer.compare(countB, countA);
+                        } catch (RemoteException e) {
+                            return 0;
+                        }
+                    });
                     return links;
 
                 } catch (RemoteException e) {
@@ -161,6 +171,30 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
             }
         }
         return List.of("Nenhum Barrel ativo disponível");
+    }
+
+    // ✅ New helper method: sorts URLs by number of incoming links (importance)
+    private Map<String, String> sortByIncomingLinks(Collection<String> urls, IBarrel barrel) {
+        List<String> sortedUrls = new ArrayList<>(urls);
+        sortedUrls.sort((a, b) -> {
+            try {
+                int countA = barrel.getIncomingLinks(a).size();
+                int countB = barrel.getIncomingLinks(b).size();
+                return Integer.compare(countB, countA);
+            } catch (RemoteException e) {
+                return 0;
+            }
+        });
+
+        Map<String, String> sorted = new LinkedHashMap<>();
+        for (String url : sortedUrls) {
+            try {
+                sorted.put(url, String.valueOf(barrel.getIncomingLinks(url).size()) + " incoming links");
+            } catch (RemoteException e) {
+                sorted.put(url, "Erro ao obter ligações");
+            }
+        }
+        return sorted;
     }
 
     @Override

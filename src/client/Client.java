@@ -7,10 +7,7 @@ import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.Scanner;
+import java.util.*;
 import java.util.regex.Pattern;
 
 public class Client {
@@ -20,7 +17,12 @@ public class Client {
     private static final String[] GATEWAY_HOSTS = {"localhost", "backupGateway"};
     private static IGateway gateway = null;
 
-    // Connect to any Gateway in the list
+    // Armazena últimos resultados para navegação
+    private static List<String> lastSearchResults = new ArrayList<>();
+    private static Map<String, String> lastSearchDescriptions = new HashMap<>();
+    private static List<String> lastIncomingLinks = new ArrayList<>();
+
+    // Conectar à Gateway
     public static boolean connectToGateway() {
         for (int attempt = 0; attempt < RETRY_LIMIT; attempt++) {
             for (String host : GATEWAY_HOSTS) {
@@ -53,7 +55,8 @@ public class Client {
         return success;
     }
 
-    // Menu
+    // Menu principal
+    // Menu principal (corrigido com verificação de input)
     public static void showMenu() {
         Scanner scanner = new Scanner(System.in);
         while (true) {
@@ -65,8 +68,14 @@ public class Client {
             System.out.println("5 - Sair");
             System.out.print("Opção: ");
 
-            int choice = scanner.nextInt();
-            scanner.nextLine(); // limpar buffer
+            int choice;
+
+            try {
+                choice = Integer.parseInt(scanner.nextLine().trim());
+            } catch (NumberFormatException e) {
+                System.out.println("Entrada inválida. Por favor insira um número de 1 a 5.");
+                continue; // volta ao menu
+            }
 
             switch (choice) {
                 case 1 -> {
@@ -89,12 +98,13 @@ public class Client {
                     System.out.println("Saindo...");
                     return;
                 }
-                default -> System.out.println("Opção inválida.");
+                default -> System.out.println("Opção inválida. Por favor insira um número entre 1 e 5.");
             }
         }
     }
 
-    // Index URL
+
+    // Indexar URL
     public static void indexURL(String url) {
         if (!isValidURL(url)) {
             System.err.println("URL inválido.");
@@ -114,7 +124,7 @@ public class Client {
         }
     }
 
-    // Search pages
+    // Pesquisa de páginas (com paginação)
     public static void searchPages(String searchTerm) {
         try {
             List<String> terms = Arrays.asList(searchTerm.trim().split("\\s+"));
@@ -124,19 +134,22 @@ public class Client {
 
                 if (results == null || results.isEmpty()) {
                     System.out.println("Nenhum resultado encontrado.");
-                } else {
-                    System.out.println("Resultados da pesquisa:");
-                    results.forEach((url, description) -> System.out.println("URL: " + url + " | " + description));
+                    return;
                 }
+
+                lastSearchResults = new ArrayList<>(results.keySet());
+                lastSearchDescriptions = results;
+
+                showPagedResults(lastSearchResults, lastSearchDescriptions, "pesquisa");
             } else {
-                System.err.println("Gateway não está conectado.");
+                System.err.println("Gateway não está conectada.");
             }
         } catch (RemoteException e) {
             System.err.println("Erro ao realizar a pesquisa: " + e.getMessage());
         }
     }
 
-    // Get incoming links
+    // Links de entrada (com paginação)
     public static void getIncomingLinks(String url) {
         try {
             List<String> links = RetryLogic.executeWithRetry(
@@ -151,15 +164,46 @@ public class Client {
                 return;
             }
 
-            System.out.println("Links apontando para '" + url + "':");
-            links.forEach(System.out::println);
+            lastIncomingLinks = links;
+            showPagedResults(lastIncomingLinks, null, "links");
 
         } catch (Exception e) {
             System.err.println("Erro ao consultar links: " + e.getMessage());
         }
     }
 
-    // ⬇️ New method to get statistics from Gateway
+    // Mostrar resultados paginados
+    private static void showPagedResults(List<String> results, Map<String, String> descriptions, String type) {
+        Scanner scanner = new Scanner(System.in);
+        int total = results.size();
+        int pageSize = 10;
+        int currentPage = 0;
+
+        while (true) {
+            int start = currentPage * pageSize;
+            int end = Math.min(start + pageSize, total);
+            List<String> page = results.subList(start, end);
+
+            System.out.println("\n=== Resultados " + type + " (" + (start + 1) + " a " + end + " de " + total + ") ===");
+            for (String item : page) {
+                if (descriptions != null)
+                    System.out.println("URL: " + item + " | " + descriptions.get(item));
+                else
+                    System.out.println(item);
+            }
+
+            System.out.println("\n1 - Próxima página | 2 - Página anterior | 3 - Voltar ao menu");
+            System.out.print("Opção: ");
+            int opt = scanner.nextInt();
+
+            if (opt == 1 && end < total) currentPage++;
+            else if (opt == 2 && currentPage > 0) currentPage--;
+            else if (opt == 3) break;
+            else System.out.println("Opção inválida.");
+        }
+    }
+
+    // Estatísticas
     public static void getSystemStats() {
         try {
             String stats = RetryLogic.executeWithRetry(
