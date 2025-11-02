@@ -1,5 +1,6 @@
 package queue;
 
+import java.net.InetAddress;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
@@ -108,7 +109,7 @@ public class URLQueue implements IQueue {
             int port = args.length > 1 ? Integer.parseInt(args[1]) : 1099;
 
             // Define o IP que o RMI vai anunciar aos clientes
-            System.setProperty("java.rmi.server.hostname", hostIP);
+            System.setProperty("java.rmi.server.hostname", InetAddress.getLocalHost().getHostAddress());
 
             // Criar instância da Queue
             URLQueue queue = new URLQueue();

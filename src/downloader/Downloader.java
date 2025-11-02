@@ -284,7 +284,7 @@ public class Downloader implements IDownloader {
             IDownloader stub = (IDownloader) UnicastRemoteObject.exportObject(downloader, 0);
 
             String downloaderName = "Downloader" + downloader.id;
-            registry.rebind(downloaderName, stub);
+            //registry.rebind(downloaderName, stub);
             System.out.println("[Downloader" + downloader.id + "] - Registado no RMI Registry como '" + downloaderName + "'.");
 
             queue.registerDownloader(stub, downloader.id);

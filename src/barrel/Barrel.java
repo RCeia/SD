@@ -8,6 +8,7 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
+import java.net.InetAddress;
 
 /**
  * Implementação de um Barrel (nó de armazenamento).
@@ -217,6 +218,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
 
         System.out.println("=============================================\n");
     }
+
     @Override
     public synchronized String getSystemStats() throws RemoteException {
         return "=== Estatísticas de " + name + " ===\n" +
@@ -230,6 +232,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
     public String toString() {
         return "[" + name + "]";
     }
+
     @Override
     public String getName() throws RemoteException {
         return name;
@@ -243,9 +246,15 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         try {
             String name = args.length > 0 ? args[0]
                     : "Barrel" + (ProcessHandle.current().pid() * 10 + new Random().nextInt(1000));
-            Barrel barrel = new Barrel(name);
 
-            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
+
+            String registryHost = args.length > 1 ? args[1] : "localhost";
+            int registryPort = args.length > 2 ? Integer.parseInt(args[2]) : 1099;
+            System.setProperty("java.rmi.server.hostname", InetAddress.getLocalHost().getHostAddress());
+
+            Registry registry = LocateRegistry.getRegistry(registryHost, registryPort);
+
+            Barrel barrel = new Barrel(name);
             registry.rebind(name, barrel);
             System.out.println("✅ [" + name + "] Registado no RMI Registry.");
 
