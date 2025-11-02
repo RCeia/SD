@@ -116,7 +116,7 @@ public class Downloader implements IDownloader {
     private boolean reconnectQueue() {
         try {
             System.out.println("[Downloader" + id + "] - Tentando reconectar à Queue...");
-            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
+            Registry registry = LocateRegistry.getRegistry(registryHost, 1099);
             IQueue newQueue = (IQueue) registry.lookup("URLQueueInterface");
             this.queue = newQueue;
             System.out.println("[Downloader" + id + "] - Reconectado à Queue com sucesso!");
