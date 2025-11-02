@@ -12,11 +12,13 @@ public class Tokenizer {
             return Collections.emptyList();
         }
 
-
+        // Converte para minúsculas.
         String lowerCaseText = text.toLowerCase();
 
-        String cleanText = lowerCaseText.replaceAll("[^a-zà-ú0-9\\\\s]", "");
+        // Remove tudo exceto letras e espaços.
+        String cleanText = lowerCaseText.replaceAll("[^\\p{L}\\s]+", " ");
 
+        // Divide por espaços e remove tokens vazios.
         return Arrays.stream(cleanText.split("\\s+"))
                 .filter(token -> !token.isEmpty())
                 .collect(Collectors.toList());

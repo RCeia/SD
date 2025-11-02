@@ -14,8 +14,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class AdaptiveStopWords extends UnicastRemoteObject implements IAdaptiveStopWords {
 
+    private static final long MIN_DOCS_TO_LEARN = 100;
     private final Map<String, Integer> docFrequency = new HashMap<>();
-    private final Set<String> processedURLs = ConcurrentHashMap.newKeySet();
+    private int processedDocs = 0;
 
     public AdaptiveStopWords() throws RemoteException {
         super();
@@ -23,34 +24,28 @@ public class AdaptiveStopWords extends UnicastRemoteObject implements IAdaptiveS
 
     @Override
     public synchronized void processDoc(String url, Set<String> uniqueWords) throws RemoteException {
-        if (processedURLs.add(url)) {
-            for (String word : uniqueWords) {
-                docFrequency.merge(word, 1, Integer::sum);
-            }
-            System.out.println("[AdaptiveStopWords] URL " + url + " processado. Total de documentos: " + docFrequency.size());
+        processedDocs++;
+        for (String word : uniqueWords) {
+            docFrequency.merge(word, 1, Integer::sum);
         }
+        System.out.println("[AdaptiveStopWords] URL " + url + " processado. Total de documentos: " + processedDocs);
     }
 
     @Override
     public Set<String> getStopWords(double threshold) throws RemoteException {
         Set<String> stopWords = new HashSet<>();
-        long totalDocs = processedURLs.size();
-        if (totalDocs == 0) {
-            return stopWords; // Ainda não processou URLs por isso não aprendeu nenhuma stop word
+
+        if (processedDocs < MIN_DOCS_TO_LEARN) {
+            return stopWords; // Ainda não processou documentos suficientes
         }
 
         for (Map.Entry<String, Integer> entry : docFrequency.entrySet()) {
-            double dfRatio = (double) entry.getValue() / totalDocs;
+            double dfRatio = (double) entry.getValue() / processedDocs;
             if (dfRatio > threshold) {
                 stopWords.add(entry.getKey());
             }
         }
         return stopWords;
-    }
-
-    @Override
-    public boolean isURLprocessed(String url) throws RemoteException {
-        return processedURLs.contains(url);
     }
 
     public static void main(String[] args) {
