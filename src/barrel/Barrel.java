@@ -70,7 +70,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
     @Override
     public synchronized void storePage(PageData page) throws RemoteException {
         if (!isActive) {
-            System.out.println("⏸️ [" + name + "] Em modo read-only. Ignorando storePage().");
+            System.out.println("[" + name + "] Em modo read-only. Ignorando storePage().");
             return;
         }
 
@@ -84,7 +84,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
             incomingLinks.computeIfAbsent(link, _ -> new HashSet<>()).add(url);
         }
 
-        System.out.println("📦 [" + name + "] Página armazenada: " + url);
+        System.out.println("[" + name + "] Página armazenada: " + url);
     }
 
     // -------------------------------------------------------------------------
@@ -100,30 +100,30 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
                         // Só copia de barrels ativos
                         if (!other.isActive()) continue;
 
-                        System.out.println("🔗 [" + name + "] Encontrado barrel ativo: " + bound);
-                        System.out.println("🔄 [" + name + "] Copiando índice de " + bound + "...");
+                        System.out.println("[" + name + "] Encontrado barrel ativo: " + bound);
+                        System.out.println("[" + name + "] Copiando índice de " + bound + "...");
 
                         copyIndexFrom(other);
 
                         isActive = true;
-                        System.out.println("✅ [" + name + "] Sincronização concluída. Agora ativo!");
+                        System.out.println("[" + name + "] Sincronização concluída. Agora ativo!");
                         notifyDownloadersActive(registry);
-                        System.out.println("🚀 [" + name + "] Barrel totalmente operacional e pronto para receber páginas!");
+                        System.out.println("[" + name + "] Barrel totalmente operacional e pronto para receber páginas!");
                         return; // já sincronizou com um barrel ativo
                     } catch (RemoteException e) {
-                        System.err.println("⚠️ [" + name + "] Barrel " + bound + " inativo, ignorado.");
+                        System.err.println("[" + name + "] Barrel " + bound + " inativo, ignorado.");
                     }
                 }
             }
 
             // Se não encontrou nenhum barrel → é o primeiro
-            System.out.println("🆕 [" + name + "] Primeiro barrel da rede. Marcado como ativo.");
+            System.out.println("[" + name + "] Primeiro barrel da rede. Marcado como ativo.");
             isActive = true;
             notifyDownloadersActive(registry);
-            System.out.println("🚀 [" + name + "] Barrel totalmente operacional e pronto para receber páginas!");
+            System.out.println("[" + name + "] Barrel totalmente operacional e pronto para receber páginas!");
 
         } catch (Exception e) {
-            System.err.println("⚠️ [" + name + "] Erro na autodescoberta: " + e.getMessage());
+            System.err.println("[" + name + "] Erro na autodescoberta: " + e.getMessage());
         }
     }
 
@@ -147,7 +147,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
             }
 
         } catch (RemoteException e) {
-            System.err.println("⚠️ [" + name + "] Falha durante cópia de índice: " + e.getMessage());
+            System.err.println("[" + name + "] Falha durante cópia de índice: " + e.getMessage());
             throw e;
         }
     }
@@ -163,14 +163,14 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
                     try {
                         IDownloader d = (IDownloader) registry.lookup(bound);
                         d.addBarrel(this); // callback remoto
-                        System.out.println("📣 [" + name + "] Notificado " + bound + " sobre novo barrel ativo.");
+                        System.out.println("[" + name + "] Notificado " + bound + " sobre novo barrel ativo.");
                     } catch (Exception e) {
-                        System.err.println("⚠️ [" + name + "] Falha ao notificar " + bound + ": " + e.getMessage());
+                        System.err.println("[" + name + "] Falha ao notificar " + bound + ": " + e.getMessage());
                     }
                 }
             }
         } catch (Exception e) {
-            System.err.println("⚠️ [" + name + "] Erro ao notificar downloaders: " + e.getMessage());
+            System.err.println("[" + name + "] Erro ao notificar downloaders: " + e.getMessage());
         }
     }
 
@@ -261,13 +261,13 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
             Barrel barrel = new Barrel(name);
             registry.rebind(name, barrel);
 
-            System.out.println("✅ [" + name + "] Registado no RMI Registry.");
+            System.out.println("[" + name + "] Registado no RMI Registry.");
 
             // Descobrir automaticamente outros barrels
             barrel.discoverOtherBarrels(registry);
 
             // -----------------------------------------------------------------
-            // 🔁 Tentativa de registo na Gateway com retry automático
+            // Tentativa de registo na Gateway com retry automático
             // -----------------------------------------------------------------
             new Thread(() -> {
                 boolean registered = false;
@@ -275,10 +275,10 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
                     try {
                         IGateway gateway = (IGateway) registry.lookup("Gateway");
                         gateway.registerBarrel(barrel);
-                        System.out.println("📡 [" + name + "] Barrel registado com sucesso na Gateway!");
+                        System.out.println("[" + name + "] Barrel registado com sucesso na Gateway!");
                         registered = true;
                     } catch (Exception e) {
-                        System.out.println("⚠️ [" + name + "] Gateway não disponível. Nova tentativa em 5s...");
+                        System.out.println("[" + name + "] Gateway não disponível. Nova tentativa em 5s...");
                         try {
                             Thread.sleep(5000);
                         } catch (InterruptedException ignored) {}
@@ -301,26 +301,26 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
                         try {
                             int invertedSize = barrel.getInvertedIndex().size();
                             int incomingSize = barrel.getIncomingLinksMap().size();
-                            System.out.println("\n📊 [Resumo do índice]");
+                            System.out.println("\n [Resumo do índice]");
                             System.out.println(" - Entradas no invertedIndex : " + invertedSize);
                             System.out.println(" - Entradas em incomingLinks : " + incomingSize);
                             System.out.println(" - Total combinado            : " + (invertedSize + incomingSize));
                         } catch (Exception e) {
-                            System.err.println("⚠️ Erro ao obter estatísticas do índice: " + e.getMessage());
+                            System.err.println("⚠ Erro ao obter estatísticas do índice: " + e.getMessage());
                         }
 
                     } else if (cmd.equalsIgnoreCase("exit")) {
                         try {
                             registry.unbind(name);
                             UnicastRemoteObject.unexportObject(barrel, true);
-                            System.out.println("🛑 [" + name + "] Barrel removido do registry e encerrado.");
+                            System.out.println("[" + name + "] Barrel removido do registry e encerrado.");
                         } catch (Exception ex) {
-                            System.err.println("⚠️ [" + name + "] Erro ao encerrar: " + ex.getMessage());
+                            System.err.println("[" + name + "] Erro ao encerrar: " + ex.getMessage());
                         }
                         System.exit(0);
 
                     } else {
-                        System.out.println("❓ Comando desconhecido. Use 'show' ou 'exit'.");
+                        System.out.println("Comando desconhecido. Use 'show' ou 'exit'.");
                     }
                 }
             }).start();

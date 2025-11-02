@@ -136,7 +136,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
                     long elapsed = System.currentTimeMillis() - start;
                     updateInternalStats(chosen, terms, Collections.emptyList(), elapsed);
 
-                    // ✅ Sort results by importance (number of incoming links)
+                    // Sort results by importance (number of incoming links)
                     Map<String, String> sorted = sortByIncomingLinks(result.keySet(), chosen);
                     return sorted;
 
@@ -178,7 +178,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
                     long elapsed = System.currentTimeMillis() - start;
                     updateInternalStats(chosen, Collections.emptyList(), List.of(url), elapsed);
 
-                    // ✅ Sort links by importance (descending number of incoming links)
+                    // Sort links by importance (descending number of incoming links)
                     links.sort((a, b) -> {
                         try {
                             int countA = chosen.getIncomingLinks(a).size();
@@ -204,7 +204,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         return List.of("Nenhum Barrel ativo disponível");
     }
 
-    // ✅ New helper method: sorts URLs by number of incoming links (importance)
+    // New helper method: sorts URLs by number of incoming links (importance)
     private Map<String, String> sortByIncomingLinks(Collection<String> urls, IBarrel barrel) {
         List<String> sortedUrls = new ArrayList<>(urls);
         sortedUrls.sort((a, b) -> {

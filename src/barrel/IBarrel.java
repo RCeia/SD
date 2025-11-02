@@ -17,9 +17,9 @@ public interface IBarrel extends Remote {
     Map<String, Set<String>> getIncomingLinksMap() throws RemoteException;
     boolean isUrlInBarrel(String url) throws RemoteException;
 
-    // NEW: return the logical name of the barrel (e.g. "Barrel357094")
+    // return the logical name of the barrel (e.g. "Barrel357094")
     String getName() throws RemoteException;
 
-    // Optional: if you still use getSystemStats on barrel, keep it
+    // if you still use getSystemStats on barrel, keep it
     String getSystemStats() throws RemoteException;
 }

@@ -88,20 +88,20 @@ public class URLQueue implements IQueue {
 
     public static void main(String[] args) {
         try {
-            // 📡 Define o IP e porta (sem ifs)
+            // Define o IP e porta (sem ifs)
             String hostIP = args.length > 0 ? args[0] : InetAddress.getLocalHost().getHostAddress();
             int port = args.length > 1 ? Integer.parseInt(args[1]) : 1099;
 
             System.setProperty("java.rmi.server.hostname", hostIP);
 
-            // 🧱 Cria e exporta o objeto remoto
+            // Cria e exporta o objeto remoto
             URLQueue queue = new URLQueue();
             Registry registry = LocateRegistry.createRegistry(port);
             IQueue stub = (IQueue) UnicastRemoteObject.exportObject(queue, 0);
             registry.rebind("URLQueueInterface", stub);
 
             System.out.println("Queue ready on " + hostIP + ":" + port);
-            queue.addURL("https://www.google.com");
+            queue.addURL("https://rceia.github.io/SD/tests/index.html");
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 try {
