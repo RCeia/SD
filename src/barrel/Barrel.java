@@ -2,6 +2,7 @@ package barrel;
 
 import common.PageData;
 import downloader.IDownloader;
+import gateway.IGateway;
 
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -9,6 +10,7 @@ import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
 import java.net.InetAddress;
+
 
 /**
  * Implementação de um Barrel (nó de armazenamento).
@@ -238,10 +240,9 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         return name;
     }
 
-
     // -------------------------------------------------------------------------
-    // Main
-    // -------------------------------------------------------------------------
+// Main
+// -------------------------------------------------------------------------
     public static void main(String[] args) {
         try {
             // Gera automaticamente o nome do barrel
@@ -258,12 +259,36 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
             Registry registry = LocateRegistry.getRegistry(registryHost, registryPort);
 
             Barrel barrel = new Barrel(name);
+            registry.rebind(name, barrel);
+
             System.out.println("✅ [" + name + "] Registado no RMI Registry.");
 
             // Descobrir automaticamente outros barrels
             barrel.discoverOtherBarrels(registry);
 
+            // -----------------------------------------------------------------
+            // 🔁 Tentativa de registo na Gateway com retry automático
+            // -----------------------------------------------------------------
+            new Thread(() -> {
+                boolean registered = false;
+                while (!registered) {
+                    try {
+                        IGateway gateway = (IGateway) registry.lookup("Gateway");
+                        gateway.registerBarrel(barrel);
+                        System.out.println("📡 [" + name + "] Barrel registado com sucesso na Gateway!");
+                        registered = true;
+                    } catch (Exception e) {
+                        System.out.println("⚠️ [" + name + "] Gateway não disponível. Nova tentativa em 5s...");
+                        try {
+                            Thread.sleep(5000);
+                        } catch (InterruptedException ignored) {}
+                    }
+                }
+            }).start();
+
+            // -----------------------------------------------------------------
             // Thread para comandos no terminal
+            // -----------------------------------------------------------------
             new Thread(() -> {
                 Scanner sc = new Scanner(System.in);
                 while (true) {
@@ -299,7 +324,6 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
                     }
                 }
             }).start();
-
 
             // Mantém o processo vivo
             synchronized (barrel) {

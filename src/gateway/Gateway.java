@@ -284,6 +284,17 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         } catch (Exception ignored) {}
         return "BarrelDesconhecido";
     }
+    @Override
+    public synchronized void registerBarrel(IBarrel barrel) throws RemoteException {
+        if (!barrels.containsKey(barrel)) {
+            barrels.put(barrel, 0L);
+            responseTimes.put(barrel, new ArrayList<>());
+            System.out.println("[Gateway] Novo Barrel registado dinamicamente: " + extractBarrelName(barrel));
+        } else {
+            System.out.println("[Gateway] Barrel já estava registado: " + extractBarrelName(barrel));
+        }
+    }
+
 
     public static void main(String[] args) {
         try {
