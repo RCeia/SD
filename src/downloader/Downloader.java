@@ -290,7 +290,6 @@ public class Downloader implements IDownloader {
 
             String downloaderName = "Downloader" + downloader.id;
             // regista o callback deste downloader no registry do servidor
-            registry.rebind(downloaderName, stub);
             System.out.println("[Downloader" + downloader.id + "] - Registado no RMI Registry remoto como '" + downloaderName + "'.");
 
             // regista-se também na queue
