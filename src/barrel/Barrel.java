@@ -258,7 +258,6 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
             Registry registry = LocateRegistry.getRegistry(registryHost, registryPort);
 
             Barrel barrel = new Barrel(name);
-            registry.rebind(name, barrel);
             System.out.println("✅ [" + name + "] Registado no RMI Registry.");
 
             // Descobrir automaticamente outros barrels
