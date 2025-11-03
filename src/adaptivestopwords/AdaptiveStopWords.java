@@ -1,7 +1,5 @@
 package adaptivestopwords;
 
-import org.jsoup.Jsoup;
-
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
@@ -10,7 +8,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class AdaptiveStopWords extends UnicastRemoteObject implements IAdaptiveStopWords {
 
