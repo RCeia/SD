@@ -139,38 +139,67 @@ public class Downloader implements IDownloader {
 
     private void download(String url) {
         new Thread(() -> {
+            // Flag para decidir se o URL deve ser re-adicionado à Queue em caso de falha.
+            boolean reAddUrlToQueue = false;
+
             try {
+                // 1. Validação de extensão
                 if (url.matches("(?i).*\\.(pdf|jpg|jpeg|png|gif|mp4|zip|rar|docx|xlsx|pptx|mp3)$")) {
                     System.out.println("[Downloader" + id + "] - URL não possui o formato permitido: " + url);
-                    notifyFinished();
                     return;
                 }
 
+                // 2. Verificação de URL já visitado no Barrel
                 if (!barrels.isEmpty()) {
                     try {
                         boolean alreadyVisited = barrels.getFirst().isUrlInBarrel(url);
                         if (alreadyVisited) {
                             System.out.println("[Downloader" + id + "] - URL já visitado anteriormente: " + url);
-                            notifyFinished();
                             return;
                         }
                     } catch (Exception e) {
                         System.err.println("[Downloader" + id + "] - Erro ao contactar o Barrel: " + e.getMessage());
-                        safeAddURL(url);
-                        notifyFinished();
+                        reAddUrlToQueue = true; // Barrel falhou, marcar para re-adicionar
                         return;
                     }
                 }
 
+                // 3. Conexão HTTP e Validação de Content-Type
+                System.out.println("[Downloader" + id + "] - Tentando conectar: " + url);
+
+                // Ajuste a conexão para usar execute() para checar o Content-Type
+                org.jsoup.Connection.Response response = Jsoup.connect(url)
+                        .timeout(5000)
+                        .ignoreHttpErrors(true)
+                        .execute();
+
+                // --- NOVA VALIDAÇÃO HTTP STATUS CODE (Falha Permanente) ---
+                int statusCode = response.statusCode();
+
+                // 4xx são geralmente erros permanentes (404, 403, 410). Excluímos 429 (Too Many Requests) que é temporário.
+                if (statusCode >= 400 && statusCode < 500 && statusCode != 429) {
+                    System.out.println("[Downloader" + id + "] - Falha Permanente HTTP (" + statusCode + "). Descartado: " + url);
+                    return; // Não re-adiciona, vai para o finally
+                }
+
+
+                String contentType = response.contentType();
+
+                // Validação de Content-Type
+                if (contentType == null || !contentType.contains("text/html")) {
+                    System.out.println("[Downloader" + id + "] - URL ignorado por tipo de conteúdo inválido (" + contentType + "): " + url);
+                    return;
+                }
+
+                // 4. Processamento do Documento
                 System.out.println("[Downloader" + id + "] - Downloading: " + url);
-                Document doc = Jsoup.connect(url).get();
+                Document doc = response.parse();
 
                 String title = doc.title();
                 String text = doc.body().text();
 
                 if (text.trim().isEmpty()) {
                     System.out.println("[Downloader" + id + "] - Página vazia ignorada: " + url);
-                    notifyFinished();
                     return;
                 }
 
@@ -184,6 +213,7 @@ public class Downloader implements IDownloader {
 
                 PageData pageData = new PageData(url, title, words, outgoingLinks);
 
+                // 5. Envio para Barrels e tratamento de links
                 sendToBarrels(pageData);
 
                 if (outgoingLinks.size() == 1) {
@@ -194,14 +224,42 @@ public class Downloader implements IDownloader {
                     System.out.println("[Downloader" + id + "] - Adicionados " + outgoingLinks.size() + " novos URLs à Queue.");
                 }
 
-                notifyFinished();
-
             } catch (Exception e) {
-                System.err.println("[Downloader" + id + "] - Erro ao processar URL: " + url + ". Será re-adicionado à Queue.");
+                // Assume que NUNCA deve ser repetido (para quebrar o loop infinito)
+                reAddUrlToQueue = false;
+
+                // A ÚNICA exceção que consideramos temporária é o Timeout.
+                if (e.getCause() instanceof java.net.SocketTimeoutException ||
+                        e instanceof java.net.SocketTimeoutException) {
+
+                    // Timeout: Vale a pena repetir.
+                    reAddUrlToQueue = true;
+                    System.err.println("[Downloader" + id + "] - Falha Temporária (Timeout). Será re-adicionado: " + url);
+
+                } else {
+                    // Qualquer outra exceção (incluindo DNS, que falha aqui): Descartado.
+                    System.err.println("[Downloader" + id + "] - Falha Permanente/Inesperada. Descartado: " + url + ". Causa: " + e.getMessage());
+                }
+
+            } finally {
+                // O bloco FINALLY É SEMPRE EXECUTADO.
+
+                if (reAddUrlToQueue) {
+                    // Tenta re-adicionar o URL que o bloco 'catch' marcou para repetição.
+                    try {
+                        safeAddURL(url);
+                        System.out.println("[Downloader" + id + "] - URL re-adicionado à Queue.");
+                    } catch (Exception ex) {
+                        System.err.println("[Downloader" + id + "] - FALHA CRÍTICA ao re-adicionar URL. " + ex.getMessage());
+                    }
+                }
+
+                // Notifica a Queue para obter o próximo URL
                 try {
-                    safeAddURL(url);
+                    notifyFinished();
+                    System.out.println("[Downloader" + id + "] - Notificado Queue: Downloader Disponível.");
                 } catch (Exception ex) {
-                    ex.printStackTrace();
+                    System.err.println("[Downloader" + id + "] - FALHA CRÍTICA ao notificar a Queue. " + ex.getMessage());
                 }
             }
         }).start();
