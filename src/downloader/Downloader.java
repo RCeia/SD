@@ -1,5 +1,6 @@
 package downloader;
 
+import adaptivestopwords.IAdaptiveStopWords;
 import common.PageData;
 import common.RetryLogic;
 import multicast.ReliableMulticast;
@@ -13,7 +14,9 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import barrel.IBarrel;
 import java.util.ArrayList;
@@ -30,13 +33,26 @@ public class Downloader implements IDownloader {
     private ReliableMulticast multicast;
     private final Object barrelLock = new Object();
 
+    //                 Campos para o algoritmo stop words
+    // ======================================================================
+    private IAdaptiveStopWords adaptiveStopWords;
+    private final Tokenizer tokenizer = new Tokenizer();
+    // Limiar de 70% para uma palavra ser considerada stop word
+    private static final double STOPWORD_THRESHOLD = 0.7;
+    // Cache local com as stopwods para evitar chamadas RMI a cada download
+    private Set<String> localStopWordsCache = new HashSet<>();
+    private int downloadCountSinceCacheUpdate = 0;
+    // ======================================================================
+
     public Downloader(IQueue queue, String registryHost, int registryPort) {
         super();
         this.queue = queue;
         this.registryHost = registryHost;
         this.registryPort = registryPort;
         this.id = (int) (ProcessHandle.current().pid() * 10 + nextId++);
-        discoverBarrels(); // tenta encontrar barrels logo ao iniciar
+        // Samu: Renomeei para discoverServices por que agora não basta que o downloader verifique se tem barrels ativos.
+        //       Agora também tem de verificar que o serviço que identifica as stop words está a correr.
+        discoverServices(); // tenta encontrar barrels logo ao iniciar
         this.multicast = new ReliableMulticast(3, 2000, 10, 2);
     }
 
@@ -203,15 +219,39 @@ public class Downloader implements IDownloader {
                     return;
                 }
 
-                List<String> words = List.of(text.split("\\s+"));
+                // Tokenizar
+                List<String> allWords = tokenizer.tokenize(text);
+                if (allWords.isEmpty()) {
+                    System.out.println("[Downloader" + id +"] - A página " + url + " não contém palavras após tokenização.");
+                    notifyFinished();
+                    return;
+                }
 
+                // Enviar palavras para o algoritmo de aprendizagem de stop words
+                Set<String> uniqueWords = new HashSet<>(allWords);
+                adaptiveStopWords.processDoc(url, uniqueWords);
+
+                // Atualizar cache de stop words
+                if (downloadCountSinceCacheUpdate++ % 10 == 0) {
+                    System.out.println("[Downloader" + id + "] - A atualizar cache de stop words...");
+                    localStopWordsCache = adaptiveStopWords.getStopWords(STOPWORD_THRESHOLD);
+                    System.out.println("[Downloader" + id + "] - Cache atualizado. " + localStopWordsCache.size() + " stop words.");
+                }
+
+                // Filtrar as palavras
+                List<String> filteredWords = allWords.stream()
+                        .filter(word -> !localStopWordsCache.contains(word))
+                        .collect(Collectors.toList());
+
+                // Extrair links
                 Elements links = doc.select("a[href]");
                 List<String> outgoingLinks = links.stream()
                         .map(link -> link.absUrl("href"))
                         .filter(href -> !href.isEmpty())
                         .collect(Collectors.toList());
 
-                PageData pageData = new PageData(url, title, words, outgoingLinks);
+                // Enviar para os barrels apenas as palavras filtradas
+                PageData pageData = new PageData(url, title, filteredWords, outgoingLinks);
 
                 // 5. Envio para Barrels e tratamento de links
                 sendToBarrels(pageData);
@@ -265,7 +305,7 @@ public class Downloader implements IDownloader {
         }).start();
     }
 
-    private void discoverBarrels() {
+    private void discoverServices() {
         try {
             Registry registry = LocateRegistry.getRegistry(registryHost, registryPort);
             String[] boundNames = registry.list();
@@ -285,6 +325,9 @@ public class Downloader implements IDownloader {
                     } catch (RemoteException e) {
                         System.err.println("[Downloader" + id + "] - Falha ao contactar " + bound + ": " + e.getMessage());
                     }
+                } else if (bound.equals("AdaptiveStopWords")) { // Procura o serviço do algoritmo stop words.
+                    adaptiveStopWords = (IAdaptiveStopWords) registry.lookup("AdaptiveStopWords");
+                    System.out.println("[Downloader" + id + "] - Ligado a AdaptiveStopWords.");
                 }
             }
 
@@ -294,6 +337,13 @@ public class Downloader implements IDownloader {
                 System.out.println("[Downloader" + id + "] - Nenhum Barrel ativo encontrado. Aguardando callback...");
             } else {
                 System.out.println("[Downloader" + id + "] - Barrels ativos encontrados: " + barrels.size());
+            }
+
+            if (adaptiveStopWords == null) {
+                System.out.println("[Downloader" + id + "] - O algortimo AdaptiveStopWords não foi encontrado. Aguardando callback...");
+
+            } else {
+                System.out.println("[Downloader" + id + "] - O algoritmo AdaptiveStopWords foi encontrado.");
             }
 
         } catch (Exception e) {
