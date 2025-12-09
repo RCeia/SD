@@ -20,6 +20,8 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
 
     private final Map<String, Set<String>> invertedIndex = new HashMap<>();
     private final Map<String, Set<String>> incomingLinks = new HashMap<>();
+    private final Map<String, String> urlSnippets = new HashMap<>();
+
     private final String name;
     private boolean isActive = false;
 
@@ -48,6 +50,10 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
         return copy;
     }
+    @Override
+    public synchronized Map<String, String> getUrlSnippets() throws RemoteException {
+        return new HashMap<>(urlSnippets);
+    }
 
     @Override
     public synchronized Set<String> getIncomingLinks(String url) throws RemoteException {
@@ -75,13 +81,40 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
 
         String url = page.getUrl();
+        List<String> words = page.getWords();
 
-        for (String word : page.getWords()) {
-            invertedIndex.computeIfAbsent(word.toLowerCase(), _ -> new HashSet<>()).add(url);
+        // --- ALTERAÇÃO: Criar snippet SEM Collectors ---
+        String snippet = "";
+
+        if (words != null && !words.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            int count = 0;
+
+            // Percorre a lista até acabar ou chegar às 20 palavras
+            for (String word : words) {
+                if (count >= 20) break; // Para se já tivermos 20 palavras
+
+                if (count > 0) {
+                    sb.append(" "); // Adiciona espaço entre as palavras
+                }
+                sb.append(word);
+                count++;
+            }
+            snippet = sb.toString() + "...";
+
+            // Guarda no mapa
+            urlSnippets.put(url, snippet);
+        }
+        // -----------------------------------------------
+
+        // Indexação normal (Palavra -> URLs)
+        for (String word : words) {
+            invertedIndex.computeIfAbsent(word.toLowerCase(), k -> new HashSet<>()).add(url);
         }
 
+        // Links de entrada (Link Destino -> Quem apontou)
         for (String link : page.getOutgoingLinks()) {
-            incomingLinks.computeIfAbsent(link, _ -> new HashSet<>()).add(url);
+            incomingLinks.computeIfAbsent(link, k -> new HashSet<>()).add(url);
         }
 
         System.out.println("[" + name + "] Página armazenada: " + url);
@@ -131,6 +164,8 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         try {
             Map<String, Set<String>> otherIndex = barrel.getInvertedIndex();
             Map<String, Set<String>> otherIncoming = barrel.getIncomingLinksMap();
+            // --- CORREÇÃO: Obter snippets do outro barrel ---
+            Map<String, String> otherSnippets = barrel.getUrlSnippets();
 
             for (Map.Entry<String, Set<String>> entry : otherIndex.entrySet()) {
                 invertedIndex.merge(entry.getKey(), entry.getValue(), (a, b) -> {
@@ -145,6 +180,9 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
                     return a;
                 });
             }
+
+            // --- CORREÇÃO: Guardar os snippets copiados ---
+            urlSnippets.putAll(otherSnippets);
 
         } catch (RemoteException e) {
             System.err.println("[" + name + "] Falha durante cópia de índice: " + e.getMessage());
@@ -184,7 +222,11 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
             Set<String> urls = invertedIndex.get(term.toLowerCase());
             if (urls != null) {
                 for (String url : urls) {
-                    results.put(url, "Contém: " + term);
+                    // --- CORREÇÃO: Buscar o snippet ---
+                    String snippet = urlSnippets.getOrDefault(url, "[Sem pré-visualização]");
+
+                    // Envia a string combinada que a Gateway espera
+                    results.put(url, "Contém: " + term + " | Snippet: " + snippet);
                 }
             }
         }

@@ -126,18 +126,21 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
                     long start = System.currentTimeMillis();
 
                     String barrelName = extractBarrelName(chosen);
+
+                    // O Barrel devolve: { "url": "Contém: termo | Snippet: bla bla..." }
                     Map<String, String> result = RetryLogic.executeWithRetry(
-                            3,                     // 3 tentativas
-                            2000,                  // delay 2 segundos
-                            () -> tryReconnect(barrelName),  // ação de reconexão
-                            () -> chosen.search(terms)       // operação remota
+                            3,
+                            2000,
+                            () -> tryReconnect(barrelName),
+                            () -> chosen.search(terms)
                     );
 
                     long elapsed = System.currentTimeMillis() - start;
                     updateInternalStats(chosen, terms, Collections.emptyList(), elapsed);
 
-                    // Sort results by importance (number of incoming links)
-                    Map<String, String> sorted = sortByIncomingLinks(result.keySet(), chosen);
+                    // --- ALTERAÇÃO AQUI: Passamos o mapa 'result' inteiro ---
+                    Map<String, String> sorted = sortByIncomingLinks(result, chosen);
+
                     return sorted;
 
                 } catch (RemoteException e) {
@@ -205,8 +208,11 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
     }
 
     // New helper method: sorts URLs by number of incoming links (importance)
-    private Map<String, String> sortByIncomingLinks(Collection<String> urls, IBarrel barrel) {
-        List<String> sortedUrls = new ArrayList<>(urls);
+    // --- ALTERAÇÃO: Recebe Map<String, String> originalResults em vez de Collection ---
+    private Map<String, String> sortByIncomingLinks(Map<String, String> originalResults, IBarrel barrel) {
+
+        // Ordenação mantém-se igual
+        List<String> sortedUrls = new ArrayList<>(originalResults.keySet());
         sortedUrls.sort((a, b) -> {
             try {
                 int countA = barrel.getIncomingLinks(a).size();
@@ -220,9 +226,18 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         Map<String, String> sorted = new LinkedHashMap<>();
         for (String url : sortedUrls) {
             try {
-                sorted.put(url, String.valueOf(barrel.getIncomingLinks(url).size()) + " incoming links");
+                int linkCount = barrel.getIncomingLinks(url).size();
+
+                // Recupera o texto que veio do Barrel (Snippet)
+                String originalInfo = originalResults.get(url);
+
+                // Combina: Snippet + Informação de Relevância
+                String combinedInfo = originalInfo + " | Relevância: " + linkCount + " links";
+
+                sorted.put(url, combinedInfo);
+
             } catch (RemoteException e) {
-                sorted.put(url, "Erro ao obter ligações");
+                sorted.put(url, originalResults.get(url) + " | (Erro ao obter contagem de links)");
             }
         }
         return sorted;
