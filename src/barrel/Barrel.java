@@ -52,16 +52,24 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
     }
 
     @Override
-    public synchronized Map<String, String> search(List<String> terms) throws RemoteException {
-        Map<String, String> results = new LinkedHashMap<>();
+    public synchronized Map<String, UrlMetadata> search(List<String> terms) throws RemoteException {
+        Map<String, UrlMetadata> results = new LinkedHashMap<>();
 
         for (String term : terms) {
             Set<String> urls = invertedIndex.get(term.toLowerCase());
+
             if (urls != null) {
                 for (String url : urls) {
+                    // Obter o objeto diretamente do mapa
                     UrlMetadata meta = pageMetadata.get(url);
-                    String valueToSend = formatResultValue(meta);
-                    results.put(url, valueToSend);
+
+                    // Proteção contra nulos (caso raro onde temos URL mas perdemos metadados)
+                    if (meta == null) {
+                        meta = new UrlMetadata("Sem Título", "Sem descrição disponível.");
+                    }
+
+                    // Guardar diretamente o objeto no resultado
+                    results.put(url, meta);
                 }
             }
         }

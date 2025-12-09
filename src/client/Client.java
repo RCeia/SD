@@ -1,7 +1,8 @@
 package client;
 
-import gateway.IGateway;
 import common.RetryLogic;
+import common.UrlMetadata;
+import gateway.IGateway;
 
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
@@ -19,10 +20,15 @@ public class Client {
 
     // Armazena últimos resultados para navegação
     private static List<String> lastSearchResults = new ArrayList<>();
-    private static Map<String, String> lastSearchDescriptions = new HashMap<>();
+
+    // ALTERAÇÃO: Agora guardamos o objeto rico UrlMetadata
+    private static Map<String, UrlMetadata> lastSearchDescriptions = new HashMap<>();
+
     private static List<String> lastIncomingLinks = new ArrayList<>();
 
-    // Conectar à Gateway
+    // -------------------------------------------------------------------------
+    // Conexão e Reconexão
+    // -------------------------------------------------------------------------
     public static boolean connectToGateway() {
         for (int attempt = 0; attempt < RETRY_LIMIT; attempt++) {
             for (String host : GATEWAY_HOSTS) {
@@ -34,87 +40,81 @@ public class Client {
                 } catch (RemoteException e) {
                     System.err.println("Falha ao conectar à Gateway em " + host + ": " + e.getMessage());
                 } catch (NotBoundException e) {
-                    System.err.println("Gateway não encontrada no host " + host + ": " + e.getMessage());
+                    System.err.println("Gateway não encontrada no host " + host);
                 }
 
-                try {
-                    Thread.sleep(RETRY_DELAY);
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                }
+                try { Thread.sleep(RETRY_DELAY); } catch (InterruptedException ignored) {}
             }
         }
         return false;
     }
 
     public static boolean reconnectToGateway() {
-        System.out.println("Tentando reconectar à Gateway...");
+        System.out.println("A tentar reconectar à Gateway...");
         boolean success = connectToGateway();
         if (success) System.out.println("Reconexão bem-sucedida!");
-        else System.err.println("Falha ao reconectar à Gateway.");
+        else System.err.println("Falha ao reconectar.");
         return success;
     }
 
-    // Menu principal
-    // Menu principal (corrigido com verificação de input)
+    // -------------------------------------------------------------------------
+    // Menus e Interação
+    // -------------------------------------------------------------------------
     public static void showMenu() {
         Scanner scanner = new Scanner(System.in);
         while (true) {
-            System.out.println("\nEscolha a operação:");
+            System.out.println("\n===== GOOGOL CLIENT =====");
             System.out.println("1 - Indexar URL");
             System.out.println("2 - Pesquisar páginas");
             System.out.println("3 - Consultar links para uma página");
             System.out.println("4 - Obter estatísticas do sistema");
             System.out.println("5 - Sair");
-            System.out.print("Opção: ");
+            System.out.print("> ");
 
             int choice;
-
             try {
                 choice = Integer.parseInt(scanner.nextLine().trim());
             } catch (NumberFormatException e) {
-                System.out.println("Entrada inválida. Por favor insira um número de 1 a 5.");
-                continue; // volta ao menu
+                System.out.println("Entrada inválida.");
+                continue;
             }
 
             switch (choice) {
                 case 1 -> {
                     System.out.print("Digite o URL: ");
-                    String url = scanner.nextLine();
-                    indexURL(url);
+                    indexURL(scanner.nextLine());
                 }
                 case 2 -> {
-                    System.out.print("Digite o termo de pesquisa: ");
-                    String term = scanner.nextLine();
-                    searchPages(term);
+                    System.out.print("Pesquisa: ");
+                    searchPages(scanner.nextLine());
                 }
                 case 3 -> {
-                    System.out.print("Digite o URL para verificar links: ");
-                    String url = scanner.nextLine();
-                    getIncomingLinks(url);
+                    System.out.print("URL Alvo: ");
+                    getIncomingLinks(scanner.nextLine());
                 }
                 case 4 -> getSystemStats();
                 case 5 -> {
-                    System.out.println("Saindo...");
+                    System.out.println("A sair...");
                     return;
                 }
-                default -> System.out.println("Opção inválida. Por favor insira um número entre 1 e 5.");
+                default -> System.out.println("⚠ Opção inválida.");
             }
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Funcionalidades Principais
+    // -------------------------------------------------------------------------
 
-    // Indexar URL
     public static void indexURL(String url) {
         if (!isValidURL(url)) {
-            System.err.println("URL inválido.");
+            System.err.println("URL inválido (deve começar por http:// ou https://)");
             return;
         }
 
         try {
             String result = RetryLogic.executeWithRetry(
-                    RETRY_LIMIT,
-                    RETRY_DELAY,
+                    RETRY_LIMIT, RETRY_DELAY,
                     Client::reconnectToGateway,
                     () -> gateway.indexURL(url)
             );
@@ -124,13 +124,13 @@ public class Client {
         }
     }
 
-    // Pesquisa de páginas (com paginação)
     public static void searchPages(String searchTerm) {
         try {
             List<String> terms = Arrays.asList(searchTerm.trim().split("\\s+"));
 
             if (gateway != null) {
-                Map<String, String> results = gateway.search(terms);
+                // ALTERAÇÃO: Recebe Map<String, UrlMetadata>
+                Map<String, UrlMetadata> results = gateway.search(terms);
 
                 if (results == null || results.isEmpty()) {
                     System.out.println("Nenhum resultado encontrado.");
@@ -140,21 +140,19 @@ public class Client {
                 lastSearchResults = new ArrayList<>(results.keySet());
                 lastSearchDescriptions = results;
 
-                showPagedResults(lastSearchResults, lastSearchDescriptions, "pesquisa");
+                showPagedResults(lastSearchResults, lastSearchDescriptions, "PESQUISA");
             } else {
-                System.err.println("Gateway não está conectada.");
+                System.err.println("Gateway não conectada.");
             }
         } catch (RemoteException e) {
-            System.err.println("Erro ao realizar a pesquisa: " + e.getMessage());
+            System.err.println("Erro na pesquisa: " + e.getMessage());
         }
     }
 
-    // Links de entrada (com paginação)
     public static void getIncomingLinks(String url) {
         try {
             List<String> links = RetryLogic.executeWithRetry(
-                    RETRY_LIMIT,
-                    RETRY_DELAY,
+                    RETRY_LIMIT, RETRY_DELAY,
                     Client::reconnectToGateway,
                     () -> gateway.getIncomingLinks(url)
             );
@@ -165,58 +163,18 @@ public class Client {
             }
 
             lastIncomingLinks = links;
-            showPagedResults(lastIncomingLinks, null, "links");
+            // Passamos null nas descrições porque incoming links é só lista de URLs
+            showPagedResults(lastIncomingLinks, null, "LINKS DE ENTRADA");
 
         } catch (Exception e) {
             System.err.println("Erro ao consultar links: " + e.getMessage());
         }
     }
 
-    // Mostrar resultados paginados
-    private static void showPagedResults(List<String> results, Map<String, String> descriptions, String type) {
-        Scanner scanner = new Scanner(System.in);
-        int total = results.size();
-        int pageSize = 10;
-        int currentPage = 0;
-
-        while (true) {
-            int start = currentPage * pageSize;
-            int end = Math.min(start + pageSize, total);
-            List<String> page = results.subList(start, end);
-
-            System.out.println("\n=== Resultados " + type + " (" + (start + 1) + " a " + end + " de " + total + ") ===");
-            for (String item : page) {
-                if (descriptions != null)
-                    System.out.println("URL: " + item + " | " + descriptions.get(item));
-                else
-                    System.out.println(item);
-            }
-
-            System.out.println("\n1 - Próxima página | 2 - Página anterior | 3 - Voltar ao menu");
-            System.out.print("Opção: ");
-
-            String input = scanner.nextLine().trim();
-
-            if (input.equals("1")) {
-                if (end < total) currentPage++;
-                else System.out.println("Não há mais páginas.");
-            } else if (input.equals("2")) {
-                if (currentPage > 0) currentPage--;
-                else System.out.println("Já está na primeira página.");
-            } else if (input.equals("3")) {
-                break; // volta ao menu principal
-            } else {
-                System.out.println("Entrada inválida. Por favor insira 1, 2 ou 3.");
-            }
-        }
-    }
-
-    // Estatísticas
     public static void getSystemStats() {
         try {
             String stats = RetryLogic.executeWithRetry(
-                    RETRY_LIMIT,
-                    RETRY_DELAY,
+                    RETRY_LIMIT, RETRY_DELAY,
                     Client::reconnectToGateway,
                     () -> gateway.getSystemStats()
             );
@@ -226,7 +184,62 @@ public class Client {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Auxiliares de Exibição
+    // -------------------------------------------------------------------------
+
+    private static void showPagedResults(List<String> results, Map<String, UrlMetadata> descriptions, String type) {
+        Scanner scanner = new Scanner(System.in);
+        int total = results.size();
+        int pageSize = 5; // Reduzi para 5 para ser mais legível com metadados
+        int currentPage = 0;
+
+        while (true) {
+            int start = currentPage * pageSize;
+            int end = Math.min(start + pageSize, total);
+
+            if (start >= total) { // Proteção caso a lista mude
+                currentPage = 0;
+                continue;
+            }
+
+            List<String> page = results.subList(start, end);
+
+            System.out.println("\n=== RESULTADOS " + type + " (" + (start + 1) + "-" + end + " de " + total + ") ===");
+
+            for (String url : page) {
+                if (descriptions != null && descriptions.containsKey(url)) {
+                    // ALTERAÇÃO: Exibição bonita usando UrlMetadata
+                    UrlMetadata meta = descriptions.get(url);
+                    System.out.println("------------------------------------------------");
+                    System.out.println("Titulo: " + meta.getTitle());
+                    System.out.println("URL: " + url);
+                    System.out.println("Citação: " + meta.getCitation());
+                } else {
+                    // Fallback para quando não há descrições (ex: incoming links)
+                    System.out.println(url);
+                }
+            }
+            System.out.println("------------------------------------------------");
+
+            System.out.println("1 - Próxima | 2 - Anterior | 3 - Voltar");
+            System.out.print("> ");
+            String input = scanner.nextLine().trim();
+
+            if (input.equals("1")) {
+                if (end < total) currentPage++;
+                else System.out.println("⚠ Fim da lista.");
+            } else if (input.equals("2")) {
+                if (currentPage > 0) currentPage--;
+                else System.out.println("⚠ Início da lista.");
+            } else if (input.equals("3")) {
+                break;
+            }
+        }
+    }
+
     private static boolean isValidURL(String url) {
+        // Regex simples para validar http/https
         String regex = "^(https?|ftp)://[^\\s/$.?#].\\S*$";
         return Pattern.compile(regex).matcher(url).matches();
     }
@@ -235,7 +248,7 @@ public class Client {
         if (connectToGateway()) {
             showMenu();
         } else {
-            System.err.println("Não foi possível conectar à Gateway.");
+            System.err.println("Não foi possível iniciar o cliente.");
         }
     }
 }

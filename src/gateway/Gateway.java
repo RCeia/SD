@@ -1,5 +1,6 @@
 package gateway;
 
+import common.UrlMetadata;
 import queue.IQueue;
 import barrel.IBarrel;
 import common.RetryLogic;
@@ -115,60 +116,74 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
     }
 
     @Override
-    public Map<String, String> search(List<String> terms) throws RemoteException {
+    public Map<String, UrlMetadata> search(List<String> terms) throws RemoteException {
         synchronized (barrels) {
-            // Tenta encontrar um barrel ativo enquanto houver barrels na lista
             while (!barrels.isEmpty()) {
-                IBarrel chosen = chooseBarrel(); // Escolhe o melhor barrel (ex: round-robin ou carga)
-
-                if (chosen == null) {
-                    return Map.of("Erro", "Ocorreu um erro na seleção do Barrel.");
-                }
+                IBarrel chosen = chooseBarrel();
+                if (chosen == null) return Map.of(); // Ou lançar exceção
 
                 try {
-                    // Marca o tempo de acesso para load balancing
                     barrels.put(chosen, System.currentTimeMillis());
-                    long start = System.currentTimeMillis();
 
                     String barrelName = extractBarrelName(chosen);
 
-                    // -----------------------------------------------------------
-                    // CHAMADA RMI AO BARREL
-                    // O Barrel agora devolve:
-                    // Key: URL
-                    // Value: "Título \n Citação" (Formatado com quebra de linha)
-                    // -----------------------------------------------------------
-                    Map<String, String> result = RetryLogic.executeWithRetry(
-                            3,    // Tentativas
-                            2000, // Espera entre tentativas
-                            () -> tryReconnect(barrelName), // Lógica de reconexão
-                            () -> chosen.search(terms)      // A chamada real ao Barrel
+                    // AQUI: Recebemos Map<String, UrlMetadata> diretamente
+                    Map<String, UrlMetadata> result = RetryLogic.executeWithRetry(
+                            3,
+                            2000,
+                            () -> tryReconnect(barrelName),
+                            () -> chosen.search(terms)
                     );
 
-                    long elapsed = System.currentTimeMillis() - start;
+                    updateInternalStats(chosen, terms, Collections.emptyList(), 0);
 
-                    // Atualiza estatísticas para a página de administração
-                    updateInternalStats(chosen, terms, Collections.emptyList(), elapsed);
-
-                    // Ordena os resultados por relevância (número de links a apontar para o site)
-                    // É CRÍTICO que esta função não altere os 'Values' (Título/Citação) do mapa
-                    Map<String, String> sorted = sortByIncomingLinks(result, chosen);
-
-                    return sorted;
+                    // AQUI: Ordenamos mantendo os objetos
+                    return sortByIncomingLinks(result, chosen);
 
                 } catch (RemoteException e) {
-                    // Tratamento de falhas de conexão RMI
                     if (isConnectionRefused(e)) {
-                        System.out.println("[Gateway] Barrel inativo detetado e removido: " + extractBarrelName(chosen));
                         barrels.remove(chosen);
                         responseTimes.remove(chosen);
-                        continue; // Tenta o próximo barrel da lista
+                        continue;
                     }
-                    throw e; // Lança outras exceções (ex: erros de lógica no barrel)
+                    throw e;
                 }
             }
         }
-        return Map.of("Erro", "Nenhum Barrel ativo disponível neste momento.");
+        return Map.of();
+    }
+
+    // --- Função Auxiliar de Ordenação Atualizada ---
+
+    private Map<String, UrlMetadata> sortByIncomingLinks(Map<String, UrlMetadata> unsortedResults, IBarrel barrel) {
+        // 1. Converter para Lista para poder ordenar
+        List<Map.Entry<String, UrlMetadata>> list = new ArrayList<>(unsortedResults.entrySet());
+
+        // 2. Ordenar
+        list.sort((entry1, entry2) -> {
+            String url1 = entry1.getKey();
+            String url2 = entry2.getKey();
+            int count1 = 0;
+            int count2 = 0;
+
+            try {
+                // Obtém contagem de links (lógica mantém-se igual, baseada na Key/URL)
+                count1 = barrel.getIncomingLinks(url1).size();
+                count2 = barrel.getIncomingLinks(url2).size();
+            } catch (RemoteException e) {
+                System.err.println("Erro na ordenação: " + e.getMessage());
+            }
+
+            return Integer.compare(count2, count1); // Ordem decrescente
+        });
+
+        // 3. Reconstruir LinkedHashMap
+        Map<String, UrlMetadata> sortedMap = new LinkedHashMap<>();
+        for (Map.Entry<String, UrlMetadata> entry : list) {
+            sortedMap.put(entry.getKey(), entry.getValue());
+        }
+
+        return sortedMap;
     }
 
     @Override
@@ -219,42 +234,6 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
             }
         }
         return List.of("Nenhum Barrel ativo disponível");
-    }
-
-    // New helper method: sorts URLs by number of incoming links (importance)
-    // --- ALTERAÇÃO: Recebe Map<String, String> originalResults em vez de Collection ---
-    private Map<String, String> sortByIncomingLinks(Map<String, String> originalResults, IBarrel barrel) {
-
-        // Ordenação mantém-se igual
-        List<String> sortedUrls = new ArrayList<>(originalResults.keySet());
-        sortedUrls.sort((a, b) -> {
-            try {
-                int countA = barrel.getIncomingLinks(a).size();
-                int countB = barrel.getIncomingLinks(b).size();
-                return Integer.compare(countB, countA);
-            } catch (RemoteException e) {
-                return 0;
-            }
-        });
-
-        Map<String, String> sorted = new LinkedHashMap<>();
-        for (String url : sortedUrls) {
-            try {
-                int linkCount = barrel.getIncomingLinks(url).size();
-
-                // Recupera o texto que veio do Barrel (Snippet)
-                String originalInfo = originalResults.get(url);
-
-                // Combina: Snippet + Informação de Relevância
-                String combinedInfo = originalInfo + " | Relevância: " + linkCount + " links";
-
-                sorted.put(url, combinedInfo);
-
-            } catch (RemoteException e) {
-                sorted.put(url, originalResults.get(url) + " | (Erro ao obter contagem de links)");
-            }
-        }
-        return sorted;
     }
 
     @Override

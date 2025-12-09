@@ -13,7 +13,7 @@ public interface IBarrel extends Remote {
 
     // Funcionalidades Principais
     void storePage(PageData page) throws RemoteException;
-    Map<String, String> search(List<String> terms) throws RemoteException;
+    Map<String, UrlMetadata> search(List<String> terms) throws RemoteException;
 
     // Consultas de Links
     boolean isUrlInBarrel(String url) throws RemoteException;
