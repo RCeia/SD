@@ -117,44 +117,58 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
     @Override
     public Map<String, String> search(List<String> terms) throws RemoteException {
         synchronized (barrels) {
+            // Tenta encontrar um barrel ativo enquanto houver barrels na lista
             while (!barrels.isEmpty()) {
-                IBarrel chosen = chooseBarrel();
-                if (chosen == null) return Map.of("Erro", "Ocorreu um erro na pesquisa");
+                IBarrel chosen = chooseBarrel(); // Escolhe o melhor barrel (ex: round-robin ou carga)
+
+                if (chosen == null) {
+                    return Map.of("Erro", "Ocorreu um erro na seleção do Barrel.");
+                }
 
                 try {
+                    // Marca o tempo de acesso para load balancing
                     barrels.put(chosen, System.currentTimeMillis());
                     long start = System.currentTimeMillis();
 
                     String barrelName = extractBarrelName(chosen);
 
-                    // O Barrel devolve: { "url": "Contém: termo | Snippet: bla bla..." }
+                    // -----------------------------------------------------------
+                    // CHAMADA RMI AO BARREL
+                    // O Barrel agora devolve:
+                    // Key: URL
+                    // Value: "Título \n Citação" (Formatado com quebra de linha)
+                    // -----------------------------------------------------------
                     Map<String, String> result = RetryLogic.executeWithRetry(
-                            3,
-                            2000,
-                            () -> tryReconnect(barrelName),
-                            () -> chosen.search(terms)
+                            3,    // Tentativas
+                            2000, // Espera entre tentativas
+                            () -> tryReconnect(barrelName), // Lógica de reconexão
+                            () -> chosen.search(terms)      // A chamada real ao Barrel
                     );
 
                     long elapsed = System.currentTimeMillis() - start;
+
+                    // Atualiza estatísticas para a página de administração
                     updateInternalStats(chosen, terms, Collections.emptyList(), elapsed);
 
-                    // --- ALTERAÇÃO AQUI: Passamos o mapa 'result' inteiro ---
+                    // Ordena os resultados por relevância (número de links a apontar para o site)
+                    // É CRÍTICO que esta função não altere os 'Values' (Título/Citação) do mapa
                     Map<String, String> sorted = sortByIncomingLinks(result, chosen);
 
                     return sorted;
 
                 } catch (RemoteException e) {
+                    // Tratamento de falhas de conexão RMI
                     if (isConnectionRefused(e)) {
-                        System.out.println("[Gateway] Barrel inativo removido: " + extractBarrelName(chosen));
+                        System.out.println("[Gateway] Barrel inativo detetado e removido: " + extractBarrelName(chosen));
                         barrels.remove(chosen);
                         responseTimes.remove(chosen);
-                        continue;
+                        continue; // Tenta o próximo barrel da lista
                     }
-                    throw e;
+                    throw e; // Lança outras exceções (ex: erros de lógica no barrel)
                 }
             }
         }
-        return Map.of("Erro", "Nenhum Barrel ativo disponível");
+        return Map.of("Erro", "Nenhum Barrel ativo disponível neste momento.");
     }
 
     @Override
@@ -330,6 +344,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         } catch (Exception ignored) {}
         return "BarrelDesconhecido";
     }
+
     @Override
     public synchronized void registerBarrel(IBarrel barrel) throws RemoteException {
         if (!barrels.containsKey(barrel)) {

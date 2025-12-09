@@ -1,6 +1,7 @@
 package barrel;
 
 import common.PageData;
+import common.UrlMetadata;
 import downloader.IDownloader;
 import gateway.IGateway;
 
@@ -20,7 +21,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
 
     private final Map<String, Set<String>> invertedIndex = new HashMap<>();
     private final Map<String, Set<String>> incomingLinks = new HashMap<>();
-    private final Map<String, String> urlSnippets = new HashMap<>();
+    private final Map<String, UrlMetadata> pageMetadata = new HashMap<>();
 
     private final String name;
     private boolean isActive = false;
@@ -50,9 +51,10 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
         return copy;
     }
+
     @Override
-    public synchronized Map<String, String> getUrlSnippets() throws RemoteException {
-        return new HashMap<>(urlSnippets);
+    public synchronized Map<String, UrlMetadata> getPageMetadata() throws RemoteException {
+        return new HashMap<>(pageMetadata);
     }
 
     @Override
@@ -82,30 +84,19 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
 
         String url = page.getUrl();
         List<String> words = page.getWords();
-
-        // --- ALTERAÇÃO: Criar snippet SEM Collectors ---
-        String snippet = "";
+        String title = page.getTitle(); // Assume que adicionaste getTitle() ao PageData
+        String citation = "Sem descrição disponível.";
 
         if (words != null && !words.isEmpty()) {
-            StringBuilder sb = new StringBuilder();
-            int count = 0;
+            // Lógica mais limpa: Apanha até 20 palavras
+            int limit = Math.min(words.size(), 20);
+            citation = String.join(" ", words.subList(0, limit)); // Adiciona espaço entre cada palavra
 
-            // Percorre a lista até acabar ou chegar às 20 palavras
-            for (String word : words) {
-                if (count >= 20) break; // Para se já tivermos 20 palavras
-
-                if (count > 0) {
-                    sb.append(" "); // Adiciona espaço entre as palavras
-                }
-                sb.append(word);
-                count++;
-            }
-            snippet = sb.toString() + "...";
-
-            // Guarda no mapa
-            urlSnippets.put(url, snippet);
+            if (words.size() > 20) citation += "...";
         }
-        // -----------------------------------------------
+
+        // Guarda o objeto completo (Título + Citação)
+        pageMetadata.put(url, new UrlMetadata(title, citation));
 
         // Indexação normal (Palavra -> URLs)
         for (String word : words) {
@@ -165,7 +156,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
             Map<String, Set<String>> otherIndex = barrel.getInvertedIndex();
             Map<String, Set<String>> otherIncoming = barrel.getIncomingLinksMap();
             // --- CORREÇÃO: Obter snippets do outro barrel ---
-            Map<String, String> otherSnippets = barrel.getUrlSnippets();
+            Map<String, UrlMetadata> otherMetadata = barrel.getPageMetadata();
 
             for (Map.Entry<String, Set<String>> entry : otherIndex.entrySet()) {
                 invertedIndex.merge(entry.getKey(), entry.getValue(), (a, b) -> {
@@ -181,8 +172,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
                 });
             }
 
-            // --- CORREÇÃO: Guardar os snippets copiados ---
-            urlSnippets.putAll(otherSnippets);
+            pageMetadata.putAll(otherMetadata);
 
         } catch (RemoteException e) {
             System.err.println("[" + name + "] Falha durante cópia de índice: " + e.getMessage());
@@ -222,11 +212,18 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
             Set<String> urls = invertedIndex.get(term.toLowerCase());
             if (urls != null) {
                 for (String url : urls) {
-                    // --- CORREÇÃO: Buscar o snippet ---
-                    String snippet = urlSnippets.getOrDefault(url, "[Sem pré-visualização]");
+                    // Busca o objeto de metadados
+                    UrlMetadata meta = pageMetadata.get(url);
+                    String valueToSend;
 
-                    // Envia a string combinada que a Gateway espera
-                    results.put(url, "Contém: " + term + " | Snippet: " + snippet);
+                    if (meta != null) {
+                        // Formata com quebra de linha para a Gateway/Web separar depois
+                        valueToSend = meta.getTitle() + "\n" + meta.getCitation();
+                    } else {
+                        valueToSend = "Sem Título\nSem citação disponível.";
+                    }
+
+                    results.put(url, valueToSend);
                 }
             }
         }

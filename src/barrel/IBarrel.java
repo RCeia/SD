@@ -1,6 +1,8 @@
 package barrel;
 
 import common.PageData;
+import common.UrlMetadata;
+
 import java.rmi.Remote;
 import java.rmi.RemoteException;
 import java.util.List;
@@ -19,7 +21,7 @@ public interface IBarrel extends Remote {
 
     // return the logical name of the barrel (e.g. "Barrel357094")
     String getName() throws RemoteException;
-    Map<String, String> getUrlSnippets() throws RemoteException;
+    Map<String, UrlMetadata> getPageMetadata() throws RemoteException;
     // if you still use getSystemStats on barrel, keep it
     String getSystemStats() throws RemoteException;
 }

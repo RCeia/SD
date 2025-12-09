@@ -219,6 +219,7 @@ public class Downloader implements IDownloader {
                     return;
                 }
 
+
                 // Tokenizar
                 List<String> allWords = tokenizer.tokenize(text);
                 if (allWords.isEmpty()) {
