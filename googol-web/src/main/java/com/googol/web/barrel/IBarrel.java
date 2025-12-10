@@ -1,4 +1,4 @@
-package barrel;
+package com.googol.web.barrel;
 
 import com.googol.web.common.PageData;
 import com.googol.web.common.UrlMetadata;

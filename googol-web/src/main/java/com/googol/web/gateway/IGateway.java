@@ -1,11 +1,11 @@
-package gateway;
+package com.googol.web.gateway;
 
 import java.rmi.Remote;
 import java.rmi.RemoteException;
 import java.util.List;
 import java.util.Map;
 import barrel.IBarrel;
-import common.UrlMetadata;
+import com.googol.web.common.UrlMetadata;
 
 public interface IGateway extends Remote {
     String indexURL(String url) throws RemoteException;
