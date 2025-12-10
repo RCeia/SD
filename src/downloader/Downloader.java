@@ -38,7 +38,7 @@ public class Downloader implements IDownloader {
     private IAdaptiveStopWords adaptiveStopWords;
     private final Tokenizer tokenizer = new Tokenizer();
     // Limiar de 70% para uma palavra ser considerada stop word
-    private static final double STOPWORD_THRESHOLD = 0.7;
+    private static final double STOPWORD_THRESHOLD = 0.9;
     // Cache local com as stopwods para evitar chamadas RMI a cada download
     private Set<String> localStopWordsCache = new HashSet<>();
     private int downloadCountSinceCacheUpdate = 0;
