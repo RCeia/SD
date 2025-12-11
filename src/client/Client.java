@@ -1,5 +1,6 @@
 package client;
 
+import common.IClientCallback; // [NOVO] Importar a interface
 import common.RetryLogic;
 import common.UrlMetadata;
 import gateway.IGateway;
@@ -8,6 +9,7 @@ import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
+import java.rmi.server.UnicastRemoteObject; // [NOVO] Necessário para o callback
 import java.util.*;
 import java.util.regex.Pattern;
 
@@ -15,19 +17,43 @@ public class Client {
 
     private static final int RETRY_LIMIT = 3;
     private static final long RETRY_DELAY = 1000;
-    private static final String[] GATEWAY_HOSTS = {"localhost", "backupGateway"};
+    private static final String[] GATEWAY_HOSTS = {"localhost"};
     private static IGateway gateway = null;
 
-    // Armazena últimos resultados para navegação
+    // Armazena últimos resultados
     private static List<String> lastSearchResults = new ArrayList<>();
-
-    // ALTERAÇÃO: Agora guardamos o objeto rico UrlMetadata
     private static Map<String, UrlMetadata> lastSearchDescriptions = new HashMap<>();
-
     private static List<String> lastIncomingLinks = new ArrayList<>();
 
     // -------------------------------------------------------------------------
-    // Conexão e Reconexão
+    // [NOVO] Implementação do Callback para Tempo Real
+    // -------------------------------------------------------------------------
+    private static class ClientCallbackImpl extends UnicastRemoteObject implements IClientCallback {
+
+        protected ClientCallbackImpl() throws RemoteException {
+            super();
+        }
+
+        @Override
+        public void onStatisticsUpdated(String statsOutput) throws RemoteException {
+            // Esta função é chamada automaticamente pela Gateway
+
+            // Truque para "limpar" a consola (pode não funcionar em todos os terminais IDE, mas funciona na cmd)
+            // System.out.print("\033[H\033[2J");
+            // System.out.flush();
+
+            System.out.println("\n\n================================================");
+            System.out.println(">>> ATUALIZAÇÃO RECEBIDA (TEMPO REAL) <<<");
+            System.out.println("================================================");
+            System.out.println(statsOutput);
+            System.out.println("------------------------------------------------");
+            System.out.println("Digite 'sair' para voltar ao menu.");
+            System.out.print("> "); // Volta a mostrar o prompt
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Conexão
     // -------------------------------------------------------------------------
     public static boolean connectToGateway() {
         for (int attempt = 0; attempt < RETRY_LIMIT; attempt++) {
@@ -40,7 +66,7 @@ public class Client {
                 } catch (RemoteException e) {
                     System.err.println("Falha ao conectar à Gateway em " + host + ": " + e.getMessage());
                 } catch (NotBoundException e) {
-                    System.err.println("Gateway não encontrada no host " + host);
+                    // Gateway ainda não está pronta
                 }
 
                 try { Thread.sleep(RETRY_DELAY); } catch (InterruptedException ignored) {}
@@ -58,7 +84,7 @@ public class Client {
     }
 
     // -------------------------------------------------------------------------
-    // Menus e Interação
+    // Menus
     // -------------------------------------------------------------------------
     public static void showMenu() {
         Scanner scanner = new Scanner(System.in);
@@ -67,13 +93,15 @@ public class Client {
             System.out.println("1 - Indexar URL");
             System.out.println("2 - Pesquisar páginas");
             System.out.println("3 - Consultar links para uma página");
-            System.out.println("4 - Obter estatísticas do sistema");
+            System.out.println("4 - Dashboard do Sistema (Tempo Real)");
             System.out.println("5 - Sair");
             System.out.print("> ");
 
             int choice;
             try {
-                choice = Integer.parseInt(scanner.nextLine().trim());
+                String input = scanner.nextLine().trim();
+                if (input.isEmpty()) continue;
+                choice = Integer.parseInt(input);
             } catch (NumberFormatException e) {
                 System.out.println("Entrada inválida.");
                 continue;
@@ -92,10 +120,11 @@ public class Client {
                     System.out.print("URL Alvo: ");
                     getIncomingLinks(scanner.nextLine());
                 }
-                case 4 -> getSystemStats();
+                case 4 -> getSystemStats(scanner);
                 case 5 -> {
                     System.out.println("A sair...");
-                    return;
+                    // Tentar sair graciosamente
+                    System.exit(0);
                 }
                 default -> System.out.println("⚠ Opção inválida.");
             }
@@ -126,11 +155,15 @@ public class Client {
 
     public static void searchPages(String searchTerm) {
         try {
+            if (searchTerm.isBlank()) return;
             List<String> terms = Arrays.asList(searchTerm.trim().split("\\s+"));
 
             if (gateway != null) {
-                // ALTERAÇÃO: Recebe Map<String, UrlMetadata>
-                Map<String, UrlMetadata> results = gateway.search(terms);
+                Map<String, UrlMetadata> results = RetryLogic.executeWithRetry(
+                        RETRY_LIMIT, RETRY_DELAY,
+                        Client::reconnectToGateway,
+                        () -> gateway.search(terms)
+                );
 
                 if (results == null || results.isEmpty()) {
                     System.out.println("Nenhum resultado encontrado.");
@@ -143,8 +176,9 @@ public class Client {
                 showPagedResults(lastSearchResults, lastSearchDescriptions, "PESQUISA");
             } else {
                 System.err.println("Gateway não conectada.");
+                reconnectToGateway();
             }
-        } catch (RemoteException e) {
+        } catch (Exception e) {
             System.err.println("Erro na pesquisa: " + e.getMessage());
         }
     }
@@ -163,7 +197,6 @@ public class Client {
             }
 
             lastIncomingLinks = links;
-            // Passamos null nas descrições porque incoming links é só lista de URLs
             showPagedResults(lastIncomingLinks, null, "LINKS DE ENTRADA");
 
         } catch (Exception e) {
@@ -171,16 +204,44 @@ public class Client {
         }
     }
 
-    public static void getSystemStats() {
+    // [ALTERADO] Dashboard em Tempo Real
+    public static void getSystemStats(Scanner scanner) {
+        System.out.println("\n--- MODO DASHBOARD (TEMPO REAL) ---");
+        System.out.println("A conectar ao fluxo de dados...");
+
+        IClientCallback callback = null;
+
         try {
-            String stats = RetryLogic.executeWithRetry(
+            // 1. Criar o objeto de callback
+            callback = new ClientCallbackImpl();
+            final IClientCallback myCallback = callback; // Variável final para usar no lambda
+
+            // 2. Subscrever na Gateway
+            RetryLogic.executeWithRetry(
                     RETRY_LIMIT, RETRY_DELAY,
                     Client::reconnectToGateway,
-                    () -> gateway.getSystemStats()
+                    () -> { gateway.subscribe(myCallback); return null; }
             );
-            System.out.println(stats);
+
+            System.out.println(">> Subscrito! Aguarde atualizações ou digite 'sair' para voltar.");
+
+            // 3. Loop de espera (bloqueia o menu, mas recebe dados via callback)
+            while (true) {
+                String input = scanner.nextLine().trim();
+                if (input.equalsIgnoreCase("sair") || input.equalsIgnoreCase("exit")) {
+                    break;
+                }
+            }
+
+            // 4. Cancelar subscrição ao sair
+            gateway.unsubscribe(myCallback);
+            System.out.println("Dashboard fechado.");
+
         } catch (Exception e) {
-            System.err.println("Erro ao obter estatísticas: " + e.getMessage());
+            System.err.println("Erro no Dashboard: " + e.getMessage());
+            try {
+                if (callback != null && gateway != null) gateway.unsubscribe(callback);
+            } catch (RemoteException ignored) {}
         }
     }
 
@@ -191,14 +252,14 @@ public class Client {
     private static void showPagedResults(List<String> results, Map<String, UrlMetadata> descriptions, String type) {
         Scanner scanner = new Scanner(System.in);
         int total = results.size();
-        int pageSize = 5; // Reduzi para 5 para ser mais legível com metadados
+        int pageSize = 5;
         int currentPage = 0;
 
         while (true) {
             int start = currentPage * pageSize;
             int end = Math.min(start + pageSize, total);
 
-            if (start >= total) { // Proteção caso a lista mude
+            if (start >= total) {
                 currentPage = 0;
                 continue;
             }
@@ -209,29 +270,27 @@ public class Client {
 
             for (String url : page) {
                 if (descriptions != null && descriptions.containsKey(url)) {
-                    // ALTERAÇÃO: Exibição bonita usando UrlMetadata
                     UrlMetadata meta = descriptions.get(url);
                     System.out.println("------------------------------------------------");
-                    System.out.println("Titulo: " + meta.getTitle());
-                    System.out.println("URL: " + url);
-                    System.out.println("Citação: " + meta.getCitation());
+                    System.out.println("TITULO:  " + (meta.getTitle() != null ? meta.getTitle() : "Sem título"));
+                    System.out.println("URL:     " + url);
+                    System.out.println("CITAÇÃO: " + (meta.getCitation() != null ? meta.getCitation() : ""));
                 } else {
-                    // Fallback para quando não há descrições (ex: incoming links)
-                    System.out.println(url);
+                    System.out.println(" -> " + url);
                 }
             }
             System.out.println("------------------------------------------------");
 
-            System.out.println("1 - Próxima | 2 - Anterior | 3 - Voltar");
+            System.out.println("1 - Próxima | 2 - Anterior | 3 - Voltar ao Menu");
             System.out.print("> ");
             String input = scanner.nextLine().trim();
 
             if (input.equals("1")) {
                 if (end < total) currentPage++;
-                else System.out.println("⚠ Fim da lista.");
+                else System.out.println(">> Fim da lista.");
             } else if (input.equals("2")) {
                 if (currentPage > 0) currentPage--;
-                else System.out.println("⚠ Início da lista.");
+                else System.out.println(">> Início da lista.");
             } else if (input.equals("3")) {
                 break;
             }
@@ -239,7 +298,6 @@ public class Client {
     }
 
     private static boolean isValidURL(String url) {
-        // Regex simples para validar http/https
         String regex = "^(https?|ftp)://[^\\s/$.?#].\\S*$";
         return Pattern.compile(regex).matcher(url).matches();
     }
@@ -248,7 +306,7 @@ public class Client {
         if (connectToGateway()) {
             showMenu();
         } else {
-            System.err.println("Não foi possível iniciar o cliente.");
+            System.err.println("ERRO CRÍTICO: Não foi possível conectar a nenhuma Gateway.");
         }
     }
 }

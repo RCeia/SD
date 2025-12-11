@@ -23,6 +23,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
     private final Map<String, Set<String>> invertedIndex = new HashMap<>();
     private final Map<String, Set<String>> incomingLinks = new HashMap<>();
     private final Map<String, UrlMetadata> pageMetadata = new HashMap<>(); // Armazena Título e Citação
+    private IGateway gateway;
 
     // Estado do Barrel
     private final String name;
@@ -49,6 +50,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         updateIncomingLinks(page);
 
         System.out.println("[" + name + "] Página armazenada: " + page.getUrl());
+        sendStatsToGateway();
     }
 
     @Override
@@ -109,6 +111,10 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
     @Override
     public String getName() throws RemoteException {
         return name;
+    }
+
+    public void setGateway(IGateway gateway) {
+        this.gateway = gateway;
     }
 
     @Override
@@ -221,10 +227,26 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
     }
 
+    private void sendStatsToGateway() {
+        try {
+            // Só envia se já tivermos encontrado a gateway e se o barrel estiver ativo
+            if (gateway != null) {
+                int invSize = invertedIndex.size();
+                int incSize = incomingLinks.size();
+
+                // Chama o método que criámos na interface da Gateway
+                gateway.updateBarrelIndexSize(this, invSize, incSize);
+            }
+        } catch (RemoteException e) {
+            System.err.println("[" + name + "] Aviso: Não foi possível atualizar estatísticas na Gateway.");
+        }
+    }
+
     private void activateBarrel(Registry registry, boolean isFirst) {
         System.out.println("[" + name + "] " + (isFirst ? "Primeiro barrel da rede." : "Sincronização concluída.") + " Ativando...");
         this.isActive = true;
         notifyDownloadersActive(registry);
+        sendStatsToGateway();
         System.out.println("[" + name + "] Barrel operacional.");
     }
 
@@ -320,6 +342,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
             while (true) {
                 try {
                     IGateway gateway = (IGateway) registry.lookup("Gateway");
+                    barrel.setGateway(gateway); // guardar a referência
                     gateway.registerBarrel(barrel);
                     System.out.println("[" + name + "] Registado na Gateway.");
                     break;
