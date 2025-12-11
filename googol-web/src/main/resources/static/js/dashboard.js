@@ -12,14 +12,14 @@ function connect() {
     if ('WebSocket' in window) {
         websocket = new WebSocket(wsUri);
     } else {
+        if(contentDiv) contentDiv.innerHTML = "Browser não suportado.";
         return;
     }
 
     websocket.onopen = function(event) {
         if(statusDot) statusDot.classList.add("connected");
-        // REMOVIDO: contentDiv.innerHTML = "A aguardar..."
-        // Agora não escrevemos nada aqui. O servidor vai mandar os dados
-        // milissegundos depois, evitando o "piscar" da mensagem de espera.
+        // Não mostramos mensagem de espera, pois o servidor vai enviar
+        // o estado dos barrels imediatamente.
     };
 
     websocket.onmessage = function(event) {
@@ -33,41 +33,36 @@ function connect() {
 
     websocket.onclose = function(event) {
         if(statusDot) statusDot.classList.remove("connected");
-        // Não apagamos o ecrã, mantemos os últimos dados visíveis
-        setTimeout(connect, 2000);
+        setTimeout(connect, 3000);
     };
 }
 
-// ... (A função renderDashboard mantém-se igual à anterior) ...
 function renderDashboard(data, container) {
-    // ... Copie o resto da função renderDashboard da minha resposta anterior ...
-    // ... Certifique-se que usa invertedIndexCount e incomingLinksCount ...
-
     let html = "";
 
     // --- 1. TOP PESQUISAS ---
-    if (data.topSearchTerms && Object.keys(data.topSearchTerms).length > 0) {
-        html += '<span class="stats-section-title">Top Pesquisas</span>';
-        html += '<ul class="top-list">';
+    html += '<span class="stats-section-title">Top Pesquisas</span>';
+    html += '<ul class="top-list">';
 
+    // Só desenha a lista SE houver pesquisas. Se não houver, mostra mensagem.
+    if (data.topSearchTerms && Object.keys(data.topSearchTerms).length > 0) {
         let sortedSearch = Object.entries(data.topSearchTerms)
             .sort((a, b) => b[1] - a[1])
             .slice(0, 5);
 
         sortedSearch.forEach(([term, count], index) => {
-            html += `
-                <li>
-                    <span>${index + 1}. ${term}</span>
-                    <span class="count-badge">${count}</span>
-                </li>`;
+            html += `<li><span>${index + 1}. ${term}</span><span class="count-badge">${count}</span></li>`;
         });
-        html += '</ul>';
+    } else {
+        // MENSAGEM QUANDO AINDA NÃO HÁ PESQUISAS
+        html += '<li style="color:#999; font-style:italic; justify-content:center; padding:10px;">Sem pesquisas recentes</li>';
     }
+    html += '</ul>';
 
-    // --- 2. BARRELS ---
+    // --- 2. BARRELS (O que você quer ver imediatamente) ---
+    html += '<span class="stats-section-title">Estado dos Barrels</span>';
+
     if (data.barrelDetails && data.barrelDetails.length > 0) {
-        html += '<span class="stats-section-title">Estado dos Barrels</span>';
-
         data.barrelDetails.forEach(barrel => {
             let isActive = (barrel.status === "Active");
             let statusLabel = isActive ? 'ATIVO' : 'OFFLINE';
@@ -96,7 +91,7 @@ function renderDashboard(data, container) {
                 </div>`;
         });
     } else {
-        html += '<div style="padding:10px; font-size:12px; color:#999; text-align:center;">Nenhum Barrel conectado.</div>';
+        html += '<div style="padding:15px; font-size:12px; color:#999; text-align:center;">A aguardar conexão de Barrels...</div>';
     }
 
     container.innerHTML = html;
