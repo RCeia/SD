@@ -37,11 +37,6 @@ public class Client {
         @Override
         public void onStatisticsUpdated(String statsOutput) throws RemoteException {
             // Esta função é chamada automaticamente pela Gateway
-
-            // Truque para "limpar" a consola (pode não funcionar em todos os terminais IDE, mas funciona na cmd)
-            // System.out.print("\033[H\033[2J");
-            // System.out.flush();
-
             System.out.println("\n\n================================================");
             System.out.println(">>> ATUALIZAÇÃO RECEBIDA (TEMPO REAL) <<<");
             System.out.println("================================================");

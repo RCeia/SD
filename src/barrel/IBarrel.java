@@ -28,5 +28,4 @@ public interface IBarrel extends Remote {
     String getName() throws RemoteException;
     boolean isActive() throws RemoteException;
     int getIndexSize() throws RemoteException;
-    String getSystemStats() throws RemoteException;
 }

@@ -6,7 +6,7 @@ import barrel.IBarrel;
 import common.RetryLogic;
 import common.SystemStatistics;
 import common.BarrelStats;
-import common.IClientCallback; // [NOVO] Importar a interface de callback
+import common.IClientCallback;
 
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -30,7 +30,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
     private final Map<IBarrel, Integer> barrelInvertedSizes;
     private final Map<IBarrel, Integer> barrelIncomingSizes;
 
-    // [NOVO] Lista de clientes subscritos para notificações em tempo real
+    // Lista de clientes subscritos para notificações em tempo real
     private final List<IClientCallback> subscribedClients;
 
     public Gateway() throws RemoteException {
@@ -41,11 +41,12 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         this.urlFrequency = new HashMap<>();
         this.barrelInvertedSizes = new HashMap<>();
         this.barrelIncomingSizes = new HashMap<>();
-        this.subscribedClients = new ArrayList<>(); // [NOVO] Inicialização
+        this.subscribedClients = new ArrayList<>();
         this.random = new Random();
 
         try {
             Registry registry = LocateRegistry.getRegistry("localhost", 1099);
+
             // Tenta conectar à fila
             try {
                 queue = (IQueue) registry.lookup("URLQueueInterface");
@@ -72,7 +73,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         }
     }
 
-    // --- Gestão de Subscrições (Callbacks) [NOVO] ---
+    // --- Gestão de Subscrições (Callbacks) ---
 
     @Override
     public synchronized void subscribe(IClientCallback client) throws RemoteException {
@@ -81,9 +82,10 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
             System.out.println("[Gateway] Novo cliente subscrito para atualizações em tempo real.");
 
             // Envia estatísticas imediatas ao conectar para não ficar vazio
+            // [ALTERADO] Usa o método interno generateStatsReport
             if (currentStats != null) {
                 try {
-                    client.onStatisticsUpdated(getSystemStats());
+                    client.onStatisticsUpdated(generateStatsReport());
                 } catch (RemoteException e) {
                     subscribedClients.remove(client);
                 }
@@ -101,8 +103,9 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
     private void notifyClients() {
         String statsOutput;
         try {
-            statsOutput = getSystemStats(); // Gera o texto das estatísticas
-        } catch (RemoteException e) {
+            // [ALTERADO] Chamada interna para gerar o texto
+            statsOutput = generateStatsReport();
+        } catch (Exception e) {
             return;
         }
 
@@ -208,7 +211,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
                     if (elapsed == 0) elapsed = 1;
 
                     updateInternalStats(chosen, terms, Collections.emptyList(), elapsed);
-                    updateSystemStatistics(); // Isto agora dispara o notifyClients()
+                    updateSystemStatistics(); // Dispara notificação
 
                     return sortByIncomingLinks(result, chosen);
 
@@ -264,17 +267,20 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
             barrelInvertedSizes.remove(chosen);
             barrelIncomingSizes.remove(chosen);
 
-            updateSystemStatistics(); // Dispara notificação para atualizar a lista de barrels ativos nos clientes
+            updateSystemStatistics();
         } else {
             throw e;
         }
     }
 
-    // --- Estatísticas ---
+    // --- Estatísticas (MÉTODOS INTERNOS) ---
 
-    @Override
-    public String getSystemStats() throws RemoteException {
+    // [ALTERADO] Deixou de ser Override/Remote. Agora é privado e auxiliar.
+    private String generateStatsReport() {
         if (currentStats == null) updateSystemStatistics();
+
+        // Se mesmo depois do update continuar null (ex: sem barrels), evita crash
+        if (currentStats == null) return "A aguardar dados do sistema...";
 
         StringBuilder sb = new StringBuilder();
         sb.append("===== Estatísticas do Sistema (Tempo Real) =====\n\n");
@@ -332,7 +338,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
             );
         }
 
-        // [NOVO] Notificar clientes sempre que as estatísticas mudam
+        // Notificar clientes sempre que as estatísticas mudam
         notifyClients();
     }
 
@@ -342,7 +348,6 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         for (String t : terms) termFrequency.put(t, termFrequency.getOrDefault(t, 0) + 1);
         for (String u : urls) urlFrequency.put(u, urlFrequency.getOrDefault(u, 0) + 1);
 
-        // Com o fix no search (elapsed=1 se for 0), isto funciona sempre
         if (elapsed > 0) responseTimes.computeIfAbsent(barrel, k -> new ArrayList<>()).add(elapsed);
     }
 
@@ -355,7 +360,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
             barrelIncomingSizes.put(barrel, 0);
 
             System.out.println("[Gateway] Novo Barrel registado: " + extractBarrelName(barrel));
-            updateSystemStatistics(); // Dispara notificação
+            updateSystemStatistics();
         }
     }
 

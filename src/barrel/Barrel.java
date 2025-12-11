@@ -123,18 +123,6 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         return incomingLinks.values().stream().anyMatch(set -> set.contains(url));
     }
 
-    @Override
-    public synchronized String getSystemStats() throws RemoteException {
-        return String.format("=== Estatísticas de %s ===\n" +
-                        "Índice Invertido: %d\n" +
-                        "Incoming Links: %d\n" +
-                        "Total Entradas: %d\n" +
-                        "Estado: %s\n",
-                name, invertedIndex.size(), incomingLinks.size(),
-                (invertedIndex.size() + incomingLinks.size()),
-                (isActive ? "Ativo" : "Inativo"));
-    }
-
     // =========================================================================
     // MÉTODOS AUXILIARES PRIVADOS (Lógica Interna)
     // =========================================================================
