@@ -37,11 +37,6 @@ public class Downloader implements IDownloader {
     // ======================================================================
     private IAdaptiveStopWords adaptiveStopWords;
     private final Tokenizer tokenizer = new Tokenizer();
-    // Limiar de 70% para uma palavra ser considerada stop word
-    private static final double STOPWORD_THRESHOLD = 0.9;
-    // Cache local com as stopwods para evitar chamadas RMI a cada download
-    private Set<String> localStopWordsCache = new HashSet<>();
-    private int downloadCountSinceCacheUpdate = 0;
     // ======================================================================
 
     public Downloader(IQueue queue, String registryHost, int registryPort) {
@@ -227,21 +222,9 @@ public class Downloader implements IDownloader {
                     return;
                 }
 
-                // Enviar palavras para o algoritmo de aprendizagem de stop words
+                // Enviar palavras para o algoritmo de aprendizagem de stop words                
                 Set<String> uniqueWords = new HashSet<>(allWords);
                 adaptiveStopWords.processDoc(url, uniqueWords);
-
-                // Atualizar cache de stop words
-                if (downloadCountSinceCacheUpdate++ % 10 == 0) {
-                    System.out.println("[Downloader" + id + "] - A atualizar cache de stop words...");
-                    localStopWordsCache = adaptiveStopWords.getStopWords(STOPWORD_THRESHOLD);
-                    System.out.println("[Downloader" + id + "] - Cache atualizado. " + localStopWordsCache.size() + " stop words.");
-                }
-
-                // Filtrar as palavras
-                List<String> filteredWords = allWords.stream()
-                        .filter(word -> !localStopWordsCache.contains(word))
-                        .collect(Collectors.toList());
 
                 // Extrair links
                 Elements links = doc.select("a[href]");
@@ -251,7 +234,7 @@ public class Downloader implements IDownloader {
                         .collect(Collectors.toList());
 
                 // Enviar para os barrels apenas as palavras filtradas
-                PageData pageData = new PageData(url, title, filteredWords, outgoingLinks);
+                PageData pageData = new PageData(url, title, allWords, outgoingLinks);
 
                 // 5. Envio para Barrels e tratamento de links
                 sendToBarrels(pageData);
