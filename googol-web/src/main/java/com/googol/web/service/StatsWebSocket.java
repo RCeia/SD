@@ -8,54 +8,59 @@ import java.io.IOException;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 
-// Define o URL do endpoint tal como na página 9 do PDF
 @Component
 @ServerEndpoint(value = "/stats")
 public class StatsWebSocket {
 
-    // Lista estática thread-safe para guardar todas as sessões ativas (PDF pág. 17 )
     private static final Set<StatsWebSocket> connections = new CopyOnWriteArraySet<>();
+
+    // NOVO: Cache da última estatística recebida
+    private static volatile String lastMessage = null;
 
     private Session session;
 
     public StatsWebSocket() {
-        // Construtor vazio
     }
 
-    // Chamado quando um browser abre a conexão (PDF pág. 18 [cite: 229])
     @OnOpen
     public void start(Session session) {
         this.session = session;
-        connections.add(this); // Adiciona este cliente à lista
-        System.out.println("Nova conexão WebSocket aberta: " + session.getId());
+        connections.add(this);
+
+        // --- A ALTERAÇÃO MÁGICA ---
+        // Se já tivermos dados guardados em memória, enviamos
+        // imediatamente para este novo utilizador!
+        if (lastMessage != null) {
+            try {
+                session.getBasicRemote().sendText(lastMessage);
+            } catch (IOException e) {
+                // Ignorar falha no envio inicial
+            }
+        }
     }
 
-    // Chamado quando a conexão fecha (PDF pág. 18 [cite: 236])
     @OnClose
     public void end() {
-        connections.remove(this); // Remove da lista
-        System.out.println("Conexão WebSocket fechada.");
+        connections.remove(this);
     }
 
     @OnMessage
     public void incoming(String message) {
-        // Não precisamos de receber nada do cliente para este caso,
-        // mas o método pode existir se necessário (PDF pág. 10 [cite: 68]).
+        // Não utilizado
     }
 
     @OnError
-    public void onError(Throwable t) throws Throwable {
-        // Tratamento de erros
+    public void onError(Throwable t) {
         t.printStackTrace();
     }
 
-    // Método estático para enviar mensagens a todos os clientes conectados
-    // Segue a lógica de 'broadcast' da página 19 do PDF [cite: 252]
     public static void broadcast(String msg) {
+        // NOVO: Atualiza a cache sempre que houver novos dados
+        lastMessage = msg;
+
         for (StatsWebSocket client : connections) {
             try {
                 synchronized (client) {
-                    // Envia o texto para o cliente (PDF pág. 11 [cite: 96])
                     client.session.getBasicRemote().sendText(msg);
                 }
             } catch (IOException e) {

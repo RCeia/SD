@@ -1,15 +1,17 @@
 package client;
 
-import common.IClientCallback; // [NOVO] Importar a interface
+import common.IClientCallback;
 import common.RetryLogic;
 import common.UrlMetadata;
+import common.SystemStatistics; // [NOVO] Importar a classe de dados
+import common.BarrelStats;      // [NOVO] Importar a classe de dados
 import gateway.IGateway;
 
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
-import java.rmi.server.UnicastRemoteObject; // [NOVO] Necessário para o callback
+import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
 import java.util.regex.Pattern;
 
@@ -20,13 +22,12 @@ public class Client {
     private static final String[] GATEWAY_HOSTS = {"localhost"};
     private static IGateway gateway = null;
 
-    // Armazena últimos resultados
     private static List<String> lastSearchResults = new ArrayList<>();
     private static Map<String, UrlMetadata> lastSearchDescriptions = new HashMap<>();
     private static List<String> lastIncomingLinks = new ArrayList<>();
 
     // -------------------------------------------------------------------------
-    // [NOVO] Implementação do Callback para Tempo Real
+    // [ATUALIZADO] Callback agora recebe o Objeto SystemStatistics
     // -------------------------------------------------------------------------
     private static class ClientCallbackImpl extends UnicastRemoteObject implements IClientCallback {
 
@@ -35,15 +36,62 @@ public class Client {
         }
 
         @Override
-        public void onStatisticsUpdated(String statsOutput) throws RemoteException {
-            // Esta função é chamada automaticamente pela Gateway
-            System.out.println("\n\n================================================");
-            System.out.println(">>> ATUALIZAÇÃO RECEBIDA (TEMPO REAL) <<<");
+        public void onStatisticsUpdated(SystemStatistics stats) throws RemoteException {
+            System.out.println("\n\n");
             System.out.println("================================================");
-            System.out.println(statsOutput);
-            System.out.println("------------------------------------------------");
+            System.out.println("       GOOGOL DASHBOARD (TEMPO REAL)           ");
+            System.out.println("================================================");
+
+            if (stats == null) {
+                System.out.println("A aguardar dados...");
+                return;
+            }
+
+            // 1. Mostrar Top Pesquisas
+            System.out.println("\n--- TOP 10 PESQUISAS ---");
+            printTopMap(stats.getTopSearchTerms());
+
+            // 2. Mostrar Top URLs
+            System.out.println("\n--- TOP 10 URLs CONSULTADOS ---");
+            printTopMap(stats.getTopConsultedUrls());
+
+            // 3. Mostrar Estado dos Barrels
+            System.out.println("\n--- ESTADO DOS BARRELS ---");
+            List<BarrelStats> barrels = stats.getBarrelDetails();
+
+            if (barrels == null || barrels.isEmpty()) {
+                System.out.println(" (Nenhum Barrel ativo)");
+            } else {
+                for (BarrelStats b : barrels) {
+                    System.out.printf("Barrel: %-15s | Status: %s%n", b.getName(), b.getStatus());
+
+                    // --- CORREÇÃO AQUI: Usar os getters corretos do BarrelStats.java ---
+                    System.out.printf("   Palavras: %-6d | Links: %-6d | Tempo Médio: %.2fms (%d reqs)%n",
+                            b.getInvertedIndexCount(),   // Era getWordCount()
+                            b.getIncomingLinksCount(),   // Era getLinkCount()
+                            b.getAvgResponseTime(),
+                            b.getRequestCount());
+
+                    System.out.println("   -----------------------");
+                }
+            }
+
+            System.out.println("================================================");
             System.out.println("Digite 'sair' para voltar ao menu.");
-            System.out.print("> "); // Volta a mostrar o prompt
+            System.out.print("> ");
+        }
+
+        // Método auxiliar para ordenar e imprimir o Top 10 a partir do Mapa
+        private void printTopMap(Map<String, Integer> map) {
+            if (map == null || map.isEmpty()) {
+                System.out.println(" (Sem dados)");
+                return;
+            }
+
+            map.entrySet().stream()
+                    .sorted((e1, e2) -> e2.getValue().compareTo(e1.getValue())) // Ordem decrescente
+                    .limit(10) // Apenas Top 10
+                    .forEach(e -> System.out.printf(" %-20s : %d%n", e.getKey(), e.getValue()));
         }
     }
 
@@ -118,7 +166,6 @@ public class Client {
                 case 4 -> getSystemStats(scanner);
                 case 5 -> {
                     System.out.println("A sair...");
-                    // Tentar sair graciosamente
                     System.exit(0);
                 }
                 default -> System.out.println("⚠ Opção inválida.");
@@ -199,7 +246,7 @@ public class Client {
         }
     }
 
-    // [ALTERADO] Dashboard em Tempo Real
+    // [DASHBOARD] - Lógica mantém-se, apenas o callback interno mudou
     public static void getSystemStats(Scanner scanner) {
         System.out.println("\n--- MODO DASHBOARD (TEMPO REAL) ---");
         System.out.println("A conectar ao fluxo de dados...");
@@ -207,11 +254,9 @@ public class Client {
         IClientCallback callback = null;
 
         try {
-            // 1. Criar o objeto de callback
             callback = new ClientCallbackImpl();
-            final IClientCallback myCallback = callback; // Variável final para usar no lambda
+            final IClientCallback myCallback = callback;
 
-            // 2. Subscrever na Gateway
             RetryLogic.executeWithRetry(
                     RETRY_LIMIT, RETRY_DELAY,
                     Client::reconnectToGateway,
@@ -220,7 +265,6 @@ public class Client {
 
             System.out.println(">> Subscrito! Aguarde atualizações ou digite 'sair' para voltar.");
 
-            // 3. Loop de espera (bloqueia o menu, mas recebe dados via callback)
             while (true) {
                 String input = scanner.nextLine().trim();
                 if (input.equalsIgnoreCase("sair") || input.equalsIgnoreCase("exit")) {
@@ -228,7 +272,6 @@ public class Client {
                 }
             }
 
-            // 4. Cancelar subscrição ao sair
             gateway.unsubscribe(myCallback);
             System.out.println("Dashboard fechado.");
 
@@ -241,7 +284,7 @@ public class Client {
     }
 
     // -------------------------------------------------------------------------
-    // Auxiliares de Exibição
+    // Auxiliares
     // -------------------------------------------------------------------------
 
     private static void showPagedResults(List<String> results, Map<String, UrlMetadata> descriptions, String type) {
