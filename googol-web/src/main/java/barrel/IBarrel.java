@@ -1,7 +1,7 @@
 package barrel;
 
-import com.googol.web.common.PageData;
-import com.googol.web.common.UrlMetadata;
+import common.PageData;
+import common.UrlMetadata;
 
 import java.rmi.Remote;
 import java.rmi.RemoteException;
@@ -28,5 +28,4 @@ public interface IBarrel extends Remote {
     String getName() throws RemoteException;
     boolean isActive() throws RemoteException;
     int getIndexSize() throws RemoteException;
-    String getSystemStats() throws RemoteException;
 }
