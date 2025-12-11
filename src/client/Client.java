@@ -22,13 +22,19 @@ public class Client {
     private static Map<String, String> lastSearchDescriptions = new HashMap<>();
     private static List<String> lastIncomingLinks = new ArrayList<>();
 
+    private static adaptivestopwords.IAdaptiveStopWords stopWordsService = null;
+
     // Conectar à Gateway
     public static boolean connectToGateway() {
         for (int attempt = 0; attempt < RETRY_LIMIT; attempt++) {
             for (String host : GATEWAY_HOSTS) {
                 try {
-                    Registry registry = LocateRegistry.getRegistry(host, 1099);
+                    Registry registry = LocateRegistry.getRegistry(host, 1099); 
+
                     gateway = (IGateway) registry.lookup("Gateway");
+
+                    stopWordsService = (adaptivestopwords.IAdaptiveStopWords) registry.lookup("AdaptiveStopWords");
+                    
                     System.out.println("Conectado com sucesso à Gateway em " + host);
                     return true;
                 } catch (RemoteException e) {
@@ -127,7 +133,24 @@ public class Client {
     // Pesquisa de páginas (com paginação)
     public static void searchPages(String searchTerm) {
         try {
-            List<String> terms = Arrays.asList(searchTerm.trim().split("\\s+"));
+                List<String> terms = new ArrayList<>(Arrays.asList(searchTerm.trim().split("\\s+")));
+
+            if (stopWordsService != null) {
+                try {
+                    Set<String> stopWords = new HashSet<>(stopWordsService.getStopWords());
+
+                    System.out.println(stopWords);
+
+                    terms.removeIf(term -> stopWords.contains(term.toLowerCase()));
+
+                    if (terms.isEmpty()) {
+                        System.out.println("Nenhum resultado encontrado. (É Stop Word)");
+                    return;
+                    }
+                } catch (RemoteException e) {
+                    System.err.println("Aviso: Não foi possível aceder às stop words. Prosseguindo sem filtro.");
+                }
+            }
 
             if (gateway != null) {
                 Map<String, String> results = gateway.search(terms);
