@@ -32,11 +32,20 @@ public class NgrokRunner {
             System.out.println("=================================================");
 
             // 3. Montar o comando usando o caminho absoluto
-            // "start" abre uma nova janela. As aspas vazias "" são para o título da janela (truque do CMD)
-            String command = "cmd.exe /c start \"Googol Tunnel\" \"" + ngrokPath + "\" http https://localhost:8443";
+            String command;
+            String os = System.getProperty("os.name").toLowerCase();
+
+            if (os.contains("win")) {
+                // Lógica para Windows (Seu código original)
+                // "start" abre nova janela, aspas vazias para o título
+                command = "cmd.exe /c start \"Googol Tunnel\" \"" + ngrokPath + "\" http https://localhost:8443";
+            } else if (os.contains("mac")) {
+                // Lógica para macOS (Usa AppleScript para abrir nova janela)
+                command = "osascript -e 'tell application \"Terminal\" to do script \"" + ngrokPath + " http https://localhost:8443\"'";
 
             ProcessBuilder processBuilder = new ProcessBuilder(command.split(" "));
             processBuilder.start();
+            }
 
         } catch (IOException e) {
             System.err.println("❌ Falha crítica ao iniciar ngrok: " + e.getMessage());

@@ -5,6 +5,8 @@ import common.UrlMetadata;
 import common.IClientCallback; // <--- Importante: usar a interface do common
 import org.springframework.stereotype.Service;
 import jakarta.annotation.PostConstruct;
+
+import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.util.*;
@@ -13,6 +15,8 @@ import java.util.*;
 public class GoogolService {
 
     private IGateway gateway;
+
+    private adaptivestopwords.IAdaptiveStopWords stopWordsService;
 
     public GoogolService() {
     }
@@ -29,6 +33,7 @@ public class GoogolService {
         try {
             Registry registry = LocateRegistry.getRegistry("localhost", 1099);
             this.gateway = (IGateway) registry.lookup("Gateway");
+            this.stopWordsService = (adaptivestopwords.IAdaptiveStopWords) registry.lookup("AdaptiveStopWords");
             System.out.println("--- Conectado à Gateway RMI ---");
 
             RmiClientListener myListener = new RmiClientListener();
@@ -57,8 +62,25 @@ public class GoogolService {
             if (gateway == null) connectToGateway();
             if (gateway == null) return new HashMap<>();
 
-            // Retiramos todos os espaços para garantir que apenas obtemos termos corretos
-            List<String> terms = Arrays.asList(query.trim().split("\\s+"));
+            // ArrayList de termos de pesquisa independentes para que possamos retirar as Stop Words
+            List<String> terms = new ArrayList<>(Arrays.asList(query.trim().split("\\s+")));
+
+            // [SERVIÇO DE STOP WORDS] - Bloquear a pesquisa de termos que sejam Stop Words
+            if (stopWordsService != null) {
+                try {
+                    Set<String> stopWords = new HashSet<>(stopWordsService.getStopWords());
+
+                    System.out.println(stopWords);
+
+                    terms.removeIf(term -> stopWords.contains(term.toLowerCase()));
+
+                    if (terms.isEmpty()) {
+                        return new HashMap<>();
+                    }
+                } catch (RemoteException e) {
+                    System.err.println("Aviso: Não foi possível aceder às stop words. Prosseguindo sem filtro.");
+                }
+            }
             return gateway.search(terms);
         } catch (Exception e) {
             e.printStackTrace();

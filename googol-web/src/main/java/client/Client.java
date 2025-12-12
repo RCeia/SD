@@ -26,6 +26,9 @@ public class Client {
     private static Map<String, UrlMetadata> lastSearchDescriptions = new HashMap<>();
     private static List<String> lastIncomingLinks = new ArrayList<>();
 
+    // [SERVIÇO DE STOP WORDS]
+    private static adaptivestopwords.IAdaptiveStopWords stopWordsService = null;
+
     // -------------------------------------------------------------------------
     // [ATUALIZADO] Callback agora recebe o Objeto SystemStatistics
     // -------------------------------------------------------------------------
@@ -103,7 +106,11 @@ public class Client {
             for (String host : GATEWAY_HOSTS) {
                 try {
                     Registry registry = LocateRegistry.getRegistry(host, 1099);
+
                     gateway = (IGateway) registry.lookup("Gateway");
+
+                    stopWordsService = (adaptivestopwords.IAdaptiveStopWords) registry.lookup("AdaptiveStopWords");
+
                     System.out.println("Conectado com sucesso à Gateway em " + host);
                     return true;
                 } catch (RemoteException e) {
@@ -198,7 +205,26 @@ public class Client {
     public static void searchPages(String searchTerm) {
         try {
             if (searchTerm.isBlank()) return;
-            List<String> terms = Arrays.asList(searchTerm.trim().split("\\s+"));
+            // ArrayList de termos de pesquisa independentes para que possamos retirar as Stop Words
+            List<String> terms = new ArrayList<>(Arrays.asList(searchTerm.trim().split("\\s+")));
+
+            // [SERVIÇO DE STOP WORDS] - Bloquear a pesquisa de termos que sejam Stop Words
+            if (stopWordsService != null) {
+                try {
+                    Set<String> stopWords = new HashSet<>(stopWordsService.getStopWords());
+
+                    System.out.println(stopWords);
+
+                    terms.removeIf(term -> stopWords.contains(term.toLowerCase()));
+
+                    if (terms.isEmpty()) {
+                        System.out.println("Nenhum resultado encontrado. (É Stop Word)");
+                    return;
+                    }
+                } catch (RemoteException e) {
+                    System.err.println("Aviso: Não foi possível aceder às stop words. Prosseguindo sem filtro.");
+                }
+            }
 
             if (gateway != null) {
                 Map<String, UrlMetadata> results = RetryLogic.executeWithRetry(

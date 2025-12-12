@@ -12,6 +12,7 @@ import java.util.Set;
 public class AdaptiveStopWords extends UnicastRemoteObject implements IAdaptiveStopWords {
 
     private static final long MIN_DOCS_TO_LEARN = 100;
+    private static final double STOPWORD_THRESHOLD = 0.9;
     private final Map<String, Integer> docFrequency = new HashMap<>();
     private int processedDocs = 0;
 
@@ -29,7 +30,7 @@ public class AdaptiveStopWords extends UnicastRemoteObject implements IAdaptiveS
     }
 
     @Override
-    public Set<String> getStopWords(double threshold) throws RemoteException {
+    public Set<String> getStopWords() throws RemoteException {
         Set<String> stopWords = new HashSet<>();
 
         if (processedDocs < MIN_DOCS_TO_LEARN) {
@@ -38,10 +39,11 @@ public class AdaptiveStopWords extends UnicastRemoteObject implements IAdaptiveS
 
         for (Map.Entry<String, Integer> entry : docFrequency.entrySet()) {
             double dfRatio = (double) entry.getValue() / processedDocs;
-            if (dfRatio > threshold) {
+            if (dfRatio > STOPWORD_THRESHOLD) {
                 stopWords.add(entry.getKey());
             }
         }
+        System.out.println(stopWords);
         return stopWords;
     }
 

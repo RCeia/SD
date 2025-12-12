@@ -1,4 +1,4 @@
-package downloader; // Coloque no mesmo pacote do Downloader
+package adaptivestopwords; // Coloque no mesmo pacote do Downloader
 
 import java.util.Arrays;
 import java.util.Collections;
