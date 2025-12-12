@@ -1,6 +1,7 @@
 package downloader;
 
 import adaptivestopwords.IAdaptiveStopWords;
+import adaptivestopwords.Tokenizer;
 import common.PageData;
 import common.RetryLogic;
 import multicast.ReliableMulticast;
