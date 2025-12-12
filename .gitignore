@@ -49,3 +49,4 @@ Thumbs.db
 
 # --- 6. Spring Boot ---
 HELP.md
+/googol-web/src/main/resources/googol.p12
