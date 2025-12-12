@@ -4,9 +4,9 @@ import common.UrlMetadata;
 import queue.IQueue;
 import barrel.IBarrel;
 import common.RetryLogic;
-import common.SystemStatistics;
-import common.BarrelStats;
-import common.IClientCallback;
+import common.SystemStatistics; // Classe de dados
+import common.BarrelStats;      // Classe de dados
+import common.IClientCallback;  // Interface de callback atualizada
 
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
@@ -24,13 +24,14 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
     private final Map<String, Integer> urlFrequency;
     private final Random random;
 
-    // Estatísticas Globais
+    // Estatísticas (Agora guardamos o objeto em vez de texto)
     private SystemStatistics currentStats;
-    // Mapas separados para os dois tipos de tamanho
+
+    // Mapas auxiliares para guardar tamanhos reportados pelos Barrels
     private final Map<IBarrel, Integer> barrelInvertedSizes;
     private final Map<IBarrel, Integer> barrelIncomingSizes;
 
-    // Lista de clientes subscritos para notificações em tempo real
+    // Lista de clientes RMI (Spring Boot) subscritos
     private final List<IClientCallback> subscribedClients;
 
     public Gateway() throws RemoteException {
@@ -47,15 +48,16 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         try {
             Registry registry = LocateRegistry.getRegistry("localhost", 1099);
 
-            // Tenta conectar à fila
+            // Tentar conectar à Queue
             try {
                 queue = (IQueue) registry.lookup("URLQueueInterface");
                 System.out.println("[Gateway] URLQueue conectada com sucesso.");
             } catch (Exception e) {
                 System.out.println("[Gateway] Aviso: URLQueue não encontrada no arranque.");
-                throw e;
+                throw e; // Relança para o main apanhar ou lida conforme a tua lógica
             }
 
+            // Descobrir Barrels já registados
             for (String name : registry.list()) {
                 if (name.startsWith("Barrel")) {
                     try {
@@ -71,22 +73,25 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
             System.err.println("[Gateway] Erro crítico no arranque: " + e.getMessage());
             throw new RemoteException("Erro de arranque", e);
         }
+
+        startHeartbeatMonitor();
     }
 
-    // --- Gestão de Subscrições (Callbacks) ---
+    // --- GESTÃO DE SUBSCRIÇÕES (ATUALIZADO PARA OBJETOS) ---
 
     @Override
     public synchronized void subscribe(IClientCallback client) throws RemoteException {
         if (!subscribedClients.contains(client)) {
             subscribedClients.add(client);
-            System.out.println("[Gateway] Novo cliente subscrito para atualizações em tempo real.");
+            System.out.println("[Gateway] Novo cliente subscrito.");
 
-            // Envia estatísticas imediatas ao conectar para não ficar vazio
-            // [ALTERADO] Usa o método interno generateStatsReport
+            // Se já tivermos estatísticas calculadas, enviamos imediatamente
+            // para o dashboard do cliente não começar vazio.
             if (currentStats != null) {
                 try {
-                    client.onStatisticsUpdated(generateStatsReport());
+                    client.onStatisticsUpdated(currentStats);
                 } catch (RemoteException e) {
+                    System.err.println("[Gateway] Falha ao enviar stats iniciais. Cliente removido.");
                     subscribedClients.remove(client);
                 }
             }
@@ -99,49 +104,87 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         System.out.println("[Gateway] Cliente removeu subscrição.");
     }
 
-    // Método privado para enviar dados a todos os subscritos
+    private void startHeartbeatMonitor() {
+        new Thread(() -> {
+            while (true) {
+                try {
+                    // Verifica a cada 3 segundos
+                    Thread.sleep(3000);
+
+                    List<IBarrel> deadBarrels = new ArrayList<>();
+
+                    synchronized (barrels) {
+                        // 1. Testar conexão com cada Barrel
+                        for (IBarrel barrel : barrels.keySet()) {
+                            try {
+                                // Tenta uma chamada leve RMI
+                                barrel.isActive();
+                            } catch (RemoteException e) {
+                                // Se der exceção, o Barrel está morto/inacessível
+                                deadBarrels.add(barrel);
+                            }
+                        }
+
+                        // 2. Remover os mortos
+                        if (!deadBarrels.isEmpty()) {
+                            for (IBarrel dead : deadBarrels) {
+                                System.out.println("[Gateway] Heartbeat falhou. Removendo Barrel morto.");
+                                barrels.remove(dead);
+                                responseTimes.remove(dead);
+                                barrelInvertedSizes.remove(dead);
+                                barrelIncomingSizes.remove(dead);
+                            }
+
+                            // 3. Forçar atualização imediata do Dashboard
+                            updateSystemStatistics();
+                        }
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    System.err.println("[Gateway] Erro no monitor de Heartbeat: " + e.getMessage());
+                }
+            }
+        }).start();
+    }
+
     private void notifyClients() {
-        String statsOutput;
-        try {
-            // [ALTERADO] Chamada interna para gerar o texto
-            statsOutput = generateStatsReport();
-        } catch (Exception e) {
-            return;
-        }
+        // Se ainda não há dados, não vale a pena notificar
+        if (currentStats == null) return;
 
         List<IClientCallback> clientsToRemove = new ArrayList<>();
         List<IClientCallback> currentClients;
 
-        // Copia a lista para iterar com segurança
+        // Cópia defensiva para evitar ConcurrentModificationException
         synchronized (this) {
             currentClients = new ArrayList<>(subscribedClients);
         }
 
         for (IClientCallback client : currentClients) {
             try {
-                // "Empurra" a atualização para o cliente
-                client.onStatisticsUpdated(statsOutput);
+                // ENVIO DO OBJETO COMPLETO
+                client.onStatisticsUpdated(currentStats);
             } catch (RemoteException e) {
-                // Se falhar (ex: cliente fechou), marca para remover
                 clientsToRemove.add(client);
             }
         }
 
-        // Remove clientes desconectados
         if (!clientsToRemove.isEmpty()) {
             synchronized (this) {
                 subscribedClients.removeAll(clientsToRemove);
             }
-            System.out.println("[Gateway] Removidos " + clientsToRemove.size() + " clientes inativos.");
+            System.out.println("[Gateway] Limpeza: " + clientsToRemove.size() + " clientes inativos removidos.");
         }
     }
 
-    // --- Lógica Principal ---
+    // --- LÓGICA PRINCIPAL (SEARCH / INDEX / LINKS) ---
 
     private IBarrel chooseBarrel() {
         synchronized (barrels) {
             if (barrels.isEmpty()) return null;
 
+            // Estratégia: Escolher o melhor tempo médio de resposta
             boolean allHaveStats = responseTimes.values().stream()
                     .allMatch(list -> list != null && !list.isEmpty());
 
@@ -158,12 +201,15 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
                 if (bestBarrel != null) return bestBarrel;
             }
 
+            // Fallback: Tentar usar barrels nunca usados
             List<IBarrel> neverUsed = new ArrayList<>();
             for (Map.Entry<IBarrel, Long> entry : barrels.entrySet()) {
                 if (entry.getValue() == 0) neverUsed.add(entry.getKey());
             }
 
             if (!neverUsed.isEmpty()) return neverUsed.get(random.nextInt(neverUsed.size()));
+
+            // Último recurso: qualquer um serve
             return barrels.keySet().iterator().next();
         }
     }
@@ -172,7 +218,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         try {
             Registry registry = LocateRegistry.getRegistry("localhost", 1099);
             IBarrel newBarrel = (IBarrel) registry.lookup(barrelName);
-            registerBarrel(newBarrel);
+            registerBarrel(newBarrel); // Re-regista e atualiza stats
             return true;
         } catch (Exception e) {
             return false;
@@ -183,9 +229,9 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
     public String indexURL(String url) throws RemoteException {
         if (queue != null) {
             queue.addURL(url);
-            return "URL '" + url + "' enviado para indexação.";
+            return "URL enviado para indexação.";
         }
-        return "Erro: Queue não disponível.";
+        return "Erro: Queue indisponível.";
     }
 
     @Override
@@ -193,7 +239,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         synchronized (barrels) {
             while (!barrels.isEmpty()) {
                 IBarrel chosen = chooseBarrel();
-                if (chosen == null) return Map.of();
+                if (chosen == null) break;
 
                 try {
                     barrels.put(chosen, System.currentTimeMillis());
@@ -201,17 +247,18 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
 
                     long start = System.currentTimeMillis();
 
+                    // Tenta executar com repetições (Retry Logic)
                     Map<String, UrlMetadata> result = RetryLogic.executeWithRetry(
                             3, 2000,
                             () -> tryReconnect(barrelName),
                             () -> chosen.search(terms)
                     );
 
-                    long elapsed = System.currentTimeMillis() - start;
-                    if (elapsed == 0) elapsed = 1;
+                    long elapsed = Math.max(1, System.currentTimeMillis() - start);
 
+                    // Atualiza estatísticas internas e notifica clientes
                     updateInternalStats(chosen, terms, Collections.emptyList(), elapsed);
-                    updateSystemStatistics(); // Dispara notificação
+                    updateSystemStatistics();
 
                     return sortByIncomingLinks(result, chosen);
 
@@ -220,7 +267,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
                 }
             }
         }
-        return Map.of();
+        return new HashMap<>(); // Retorna vazio se falhar tudo
     }
 
     @Override
@@ -228,12 +275,12 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         synchronized (barrels) {
             while (!barrels.isEmpty()) {
                 IBarrel chosen = chooseBarrel();
-                if (chosen == null) return List.of("Nenhum Barrel ativo disponível");
+                if (chosen == null) break;
 
                 try {
                     barrels.put(chosen, System.currentTimeMillis());
-                    long start = System.currentTimeMillis();
                     String barrelName = extractBarrelName(chosen);
+                    long start = System.currentTimeMillis();
 
                     Collection<String> rawLinks = RetryLogic.executeWithRetry(
                             3, 2000,
@@ -241,71 +288,51 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
                             () -> chosen.getIncomingLinks(url)
                     );
 
+                    long elapsed = Math.max(1, System.currentTimeMillis() - start);
+
                     List<String> links = new ArrayList<>(rawLinks);
-                    long elapsed = System.currentTimeMillis() - start;
 
+                    // Atualiza stats e notifica
                     updateInternalStats(chosen, Collections.emptyList(), List.of(url), elapsed);
-                    updateSystemStatistics(); // Dispara notificação
+                    updateSystemStatistics();
 
+                    // Ordena por tamanho (exemplo simples)
                     links.sort((a, b) -> Integer.compare(b.length(), a.length()));
                     return links;
 
                 } catch (RemoteException e) {
-                    handleBarrelFailure(chosen, e, "incomingLinks");
+                    handleBarrelFailure(chosen, e, "getIncomingLinks");
                 }
             }
         }
-        return List.of("Nenhum Barrel ativo disponível");
+        return new ArrayList<>();
     }
 
     private void handleBarrelFailure(IBarrel chosen, RemoteException e, String context) throws RemoteException {
         if (isConnectionRefused(e)) {
             System.out.println("[Gateway] Barrel removido durante " + context + ": " + extractBarrelName(chosen));
 
+            // Remove de todos os mapas
             barrels.remove(chosen);
             responseTimes.remove(chosen);
             barrelInvertedSizes.remove(chosen);
             barrelIncomingSizes.remove(chosen);
 
+            // Atualiza stats para refletir a remoção do Barrel
             updateSystemStatistics();
         } else {
-            throw e;
+            throw e; // Se não for falha de conexão, relança
         }
     }
 
-    // --- Estatísticas (MÉTODOS INTERNOS) ---
-
-    // [ALTERADO] Deixou de ser Override/Remote. Agora é privado e auxiliar.
-    private String generateStatsReport() {
-        if (currentStats == null) updateSystemStatistics();
-
-        // Se mesmo depois do update continuar null (ex: sem barrels), evita crash
-        if (currentStats == null) return "A aguardar dados do sistema...";
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("===== Estatísticas do Sistema (Tempo Real) =====\n\n");
-
-        sb.append("=== Top 10 Termos ===\n");
-        printTop10(currentStats.getTopSearchTerms(), sb);
-
-        sb.append("\n=== Top 10 URLs ===\n");
-        printTop10(currentStats.getTopConsultedUrls(), sb);
-
-        sb.append("\n=== Barrels Ativos ===\n");
-        List<BarrelStats> details = currentStats.getBarrelDetails();
-
-        if (details.isEmpty()) sb.append("(Nenhum barrel ativo)\n");
-        else details.forEach(bs -> sb.append(bs.toString()).append("\n"));
-
-        return sb.toString();
-    }
+    // --- ESTATÍSTICAS DO SISTEMA (CONSTRUÇÃO DO OBJETO) ---
 
     @Override
     public void updateBarrelIndexSize(IBarrel barrel, int invertedSize, int incomingSize) throws RemoteException {
         synchronized (barrels) {
             barrelInvertedSizes.put(barrel, invertedSize);
             barrelIncomingSizes.put(barrel, incomingSize);
-            updateSystemStatistics(); // Dispara notificação
+            updateSystemStatistics(); // Recalcula e notifica sempre que há dados novos
         }
     }
 
@@ -316,21 +343,28 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
             for (IBarrel barrel : barrels.keySet()) {
                 String name = extractBarrelName(barrel);
 
+                // Calcular tempo médio
                 List<Long> times = responseTimes.get(barrel);
                 double avgTime = 0.0;
                 int count = 0;
-
                 if (times != null && !times.isEmpty()) {
                     avgTime = times.stream().mapToLong(Long::longValue).average().orElse(0.0);
                     count = times.size();
                 }
 
+                // Obter tamanhos reportados
                 int invSize = barrelInvertedSizes.getOrDefault(barrel, 0);
                 int incSize = barrelIncomingSizes.getOrDefault(barrel, 0);
 
+                // --- CORREÇÃO AQUI ---
+                // Mude 'true' para "Active" (ou a string que preferir)
                 barrelStatsList.add(new BarrelStats(name, "Active", avgTime, count, invSize, incSize));
+
+                // NOTA: Se o 3º argumento (avgTime) der erro também, verifique se o construtor
+                // pede 'double' ou 'int'. Se pedir int, use: (int) avgTime
             }
 
+            // Criar o objeto principal
             this.currentStats = new SystemStatistics(
                     new HashMap<>(termFrequency),
                     new HashMap<>(urlFrequency),
@@ -338,18 +372,20 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
             );
         }
 
-        // Notificar clientes sempre que as estatísticas mudam
+        // Enviar para todos os clientes ligados
         notifyClients();
     }
-
-    // --- Métodos Auxiliares ---
 
     private void updateInternalStats(IBarrel barrel, List<String> terms, List<String> urls, long elapsed) {
         for (String t : terms) termFrequency.put(t, termFrequency.getOrDefault(t, 0) + 1);
         for (String u : urls) urlFrequency.put(u, urlFrequency.getOrDefault(u, 0) + 1);
 
-        if (elapsed > 0) responseTimes.computeIfAbsent(barrel, k -> new ArrayList<>()).add(elapsed);
+        if (elapsed > 0) {
+            responseTimes.computeIfAbsent(barrel, k -> new ArrayList<>()).add(elapsed);
+        }
     }
+
+    // --- MÉTODOS AUXILIARES ---
 
     @Override
     public synchronized void registerBarrel(IBarrel barrel) throws RemoteException {
@@ -359,8 +395,8 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
             barrelInvertedSizes.put(barrel, 0);
             barrelIncomingSizes.put(barrel, 0);
 
-            System.out.println("[Gateway] Novo Barrel registado: " + extractBarrelName(barrel));
-            updateSystemStatistics();
+            System.out.println("[Gateway] Barrel registado: " + extractBarrelName(barrel));
+            updateSystemStatistics(); // Notifica nova entrada
         }
     }
 
@@ -378,14 +414,6 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         return sorted;
     }
 
-    private void printTop10(Map<String, Integer> map, StringBuilder sb) {
-        if (map == null || map.isEmpty()) { sb.append("Sem dados.\n"); return; }
-        map.entrySet().stream()
-                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
-                .limit(10)
-                .forEach(e -> sb.append(String.format(" - %s: %d\n", e.getKey(), e.getValue())));
-    }
-
     private boolean isConnectionRefused(RemoteException e) {
         Throwable cause = e.getCause();
         while (cause != null) {
@@ -396,7 +424,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
     }
 
     private String extractBarrelName(IBarrel barrel) {
-        try { return barrel.getName(); } catch (Exception e) { return "Barrel (Erro)"; }
+        try { return barrel.getName(); } catch (Exception e) { return "Barrel (N/A)"; }
     }
 
     public static void main(String[] args) {
@@ -404,7 +432,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
             Gateway gateway = new Gateway();
             Registry registry = LocateRegistry.getRegistry("localhost", 1099);
             registry.rebind("Gateway", gateway);
-            System.out.println("[Gateway] Gateway pronta.");
+            System.out.println("[Gateway] Serviço Gateway RMI pronto.");
         } catch (Exception e) {
             e.printStackTrace();
         }

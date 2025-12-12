@@ -3,29 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <title>Links de Entrada</title>
-    <style>
-        body { font-family: sans-serif; padding: 40px; max-width: 800px; margin: auto; }
-        h2 { color: #4285f4; }
-        ul { list-style-type: none; padding: 0; }
-        li { background: #f1f3f4; margin: 5px 0; padding: 10px; border-radius: 5px; }
-        a { color: #1a0dab; text-decoration: none; }
-        .back-btn { display: inline-block; margin-bottom: 20px; color: #555; text-decoration: none; }
-    </style>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
 </head>
 <body>
-<a href="/" class="back-btn">← Voltar à Pesquisa</a>
+<div class="container">
+    <a href="/" class="back-btn">← Voltar à Pesquisa</a>
 
-<h2>Páginas que apontam para:</h2>
-<h3 th:text="${targetUrl != null ? targetUrl : 'URL Desconhecido'}" style="color: #333; word-break: break-all;"></h3>
+    <h2 style="color: var(--accent-blue);">Páginas que apontam para:</h2>
+    <h3 th:text="${targetUrl != null ? targetUrl : 'URL Desconhecido'}" style="color: var(--text-primary); word-break: break-all;"></h3>
 
-<div th:if="${incomingLinks == null or incomingLinks.isEmpty()}">
-    <p>Nenhuma página conhecida aponta para este URL.</p>
+    <div th:if="${incomingLinks == null or incomingLinks.isEmpty()}" class="alert alert-error">
+        <p>Nenhuma página conhecida aponta para este URL.</p>
+    </div>
+
+    <ul th:if="${incomingLinks != null}" style="list-style: none; padding: 0;">
+        <li th:each="link : ${incomingLinks}" style="background: var(--card-bg); margin: 5px 0; padding: 15px; border-radius: 5px; border: 1px solid var(--border-color);">
+            <a th:href="${link}" th:text="${link}" style="color: var(--link-color); text-decoration: none;"></a>
+        </li>
+    </ul>
 </div>
-
-<ul th:if="${incomingLinks != null}">
-    <li th:each="link : ${incomingLinks}">
-        <a th:href="${link}" th:text="${link}"></a>
-    </li>
-</ul>
 </body>
 </html>
