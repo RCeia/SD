@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Links de Entrada</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+</head>
+<body>
+<div class="container">
+    <a href="/" class="back-btn">← Voltar à Pesquisa</a>
+
+    <h2 style="color: var(--accent-blue);">Páginas que apontam para:</h2>
+    <h3 th:text="${targetUrl != null ? targetUrl : 'URL Desconhecido'}" style="color: var(--text-primary); word-break: break-all;"></h3>
+
+    <div th:if="${incomingLinks == null or incomingLinks.isEmpty()}" class="alert alert-error">
+        <p>Nenhuma página conhecida aponta para este URL.</p>
+    </div>
+
+    <ul th:if="${incomingLinks != null}" style="list-style: none; padding: 0;">
+        <li th:each="link : ${incomingLinks}" style="background: var(--card-bg); margin: 5px 0; padding: 15px; border-radius: 5px; border: 1px solid var(--border-color);">
+            <a th:href="${link}" th:text="${link}" style="color: var(--link-color); text-decoration: none;"></a>
+        </li>
+    </ul>
+</div>
+</body>
+</html>

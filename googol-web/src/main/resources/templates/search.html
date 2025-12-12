@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Googol Search</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+        .search-box { margin-bottom: 30px; text-align: center; }
+        input[type="text"] { padding: 10px; width: 300px; font-size: 16px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+
+        /* Estilo dos Resultados */
+        .result-item { margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+        .result-title { font-size: 18px; color: #1a0dab; text-decoration: none; font-weight: bold; }
+        .result-title:hover { text-decoration: underline; }
+        .result-url { color: #006621; font-size: 14px; display: block; margin-top: 2px; }
+        .result-snippet { font-size: 14px; color: #545454; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="search-box">
+    <h1>Googol</h1>
+    <form action="/search" method="get">
+        <input type="text" name="q" th:value="${query}" placeholder="O que procuras hoje?">
+        <button type="submit">Pesquisar</button>
+    </form>
+</div>
+
+<div th:if="${results != null and !results.isEmpty()}">
+    <p>Resultados encontrados para: <strong th:text="${query}"></strong></p>
+
+    <div th:each="entry : ${results}" class="result-item">
+
+        <a class="result-title" th:href="${entry.key}" th:text="${entry.value.title}">Título da Página</a>
+
+        <span class="result-url" th:text="${entry.key}">http://www.exemplo.com</span>
+
+        <div class="result-snippet" th:text="${entry.value.citation}">
+            Texto de exemplo retirado da página...
+        </div>
+
+    </div>
+</div>
+
+<div th:if="${results != null and results.isEmpty()}">
+    <p>Nenhum resultado encontrado para "<span th:text="${query}"></span>".</p>
+</div>
+
+</body>
+</html>

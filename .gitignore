@@ -1,32 +1,51 @@
-# Default ignored files
-/shelf/
-/.idea/workspace.xml
-# Editor-based HTTP Client requests
-/httpRequests/
-# Datasource local storage ignored files
-/dataSources/
-/dataSources.local.xml
-# Compiled class file
+# --- 1. O "Lixo" de Compilação (Obrigatório ignorar) ---
+target/
+build/
+out/
+bin/
 *.class
-
-# Log file
 *.log
 
-# BlueJ files
-*.ctxt
+# --- 2. Ficheiros de Sistema e Temporários ---
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+*.swp
 
-# Mobile Tools for Java (J2ME)
-.mtj.tmp/
+# --- 3. Configurações de IDE (Pessoais) ---
+# IntelliJ
+.idea/
+*.iws
+*.iml
+*.ipr
+/httpRequests/
 
-# Package Files #
+# VS Code
+.vscode/
+
+# Eclipse / STS
+.settings/
+.classpath
+.project
+.factorypath
+.springBeans
+.sts4-cache
+
+# --- 4. Pacotes e Dependências ---
+# Ignorar todos os ficheiros binários finais
 *.jar
 *.war
-*.nar
 *.ear
 *.zip
 *.tar.gz
 *.rar
 
-# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
-hs_err_pid*
-replay_pid*
+# --- 5. EXCEÇÃO IMPORTANTE (Maven Wrapper) ---
+# Queremos ignorar todos os JARs (regra acima),
+# MAS precisamos deste específico para o mvnw funcionar noutros PCs.
+!maven-wrapper.jar
+!**/wrapper/maven-wrapper.jar
+
+# --- 6. Spring Boot ---
+HELP.md
