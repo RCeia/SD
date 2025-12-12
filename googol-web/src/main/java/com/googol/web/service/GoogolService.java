@@ -17,24 +17,24 @@ public class GoogolService {
     public GoogolService() {
     }
 
-    @PostConstruct
+    @PostConstruct // Poderia estar no construtor mas é boa prática do spring
     public void init() {
         connectToGateway();
     }
 
+    /**
+     * Conecta à gateway e junta-se à lista de subscribers para receber estatisticas em tempo real
+     */
     private void connectToGateway() {
         try {
             Registry registry = LocateRegistry.getRegistry("localhost", 1099);
             this.gateway = (IGateway) registry.lookup("Gateway");
             System.out.println("--- Conectado à Gateway RMI ---");
 
-            // --- CORREÇÃO AQUI ---
-
-            // 1. Instanciamos o listener
             RmiClientListener myListener = new RmiClientListener();
 
-            // 2. Passamos APENAS o listener (sem a String "SpringBootWeb")
-            // A interface IGateway espera: subscribe(IClientCallback callback)
+            // Servidor web fica subscribed à gateway de forma a que receba informação das estatísticas em tempo real
+            // Lógica igual à de um cliente RPC/RMI
             gateway.subscribe(myListener);
 
             System.out.println("--- Subscrito para receber stats via onStatisticsUpdated ---");
@@ -47,11 +47,17 @@ public class GoogolService {
 
     // --- Métodos de Pesquisa ---
 
+    /**
+     * Devolve uma lista dos termos a pesquisar e devolve os resultados da pesquisa
+     * @param query
+     * @return resultados da pesquisa
+     */
     public Map<String, UrlMetadata> search(String query) {
         try {
             if (gateway == null) connectToGateway();
             if (gateway == null) return new HashMap<>();
 
+            // Retiramos todos os espaços para garantir que apenas obtemos termos corretos
             List<String> terms = Arrays.asList(query.trim().split("\\s+"));
             return gateway.search(terms);
         } catch (Exception e) {
@@ -61,6 +67,11 @@ public class GoogolService {
         }
     }
 
+    /**
+     * Envia para a queue o URL passado como parâmetro para ser indexado
+     * @param url
+     * @return boolean que indica sucesso da operação
+     */
     public boolean indexURL(String url) {
         try {
             if (gateway == null) connectToGateway();
@@ -75,6 +86,11 @@ public class GoogolService {
         }
     }
 
+    /**
+     * Devolve os URLs que apontam para um URL passado como parâmetro
+     * @param url
+     * @return incomingLinks
+     */
     public List<String> getIncomingLinks(String url) {
         try {
             if (gateway == null) connectToGateway();
