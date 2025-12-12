@@ -32,15 +32,17 @@ public class SearchController {
     }
 
     // --- 1. PÁGINA PRINCIPAL E PESQUISA ---
-    @GetMapping("/")
+    @GetMapping("/") // Indica que esta função responde quando alguém acede à raiz do site "localhost:8443"
     public String index(
+            // Captura termos de pesquisa e número da página
             @RequestParam(name = "q", required = false) String query,
             @RequestParam(name = "page", defaultValue = "1") int page,
-            Model model
+            Model model // Pacote onde enviamos os dados para enviar para o HTML
     ) {
         if (query != null && !query.trim().isEmpty()) {
             // A. Resultados RMI
             Map<String, UrlMetadata> resultsMap = googolService.search(query);
+            // ArrayList onde guardamos entradas map do tipo (URL, metadata)
             List<Map.Entry<String, UrlMetadata>> resultList = new ArrayList<>(resultsMap.entrySet());
 
             // B. Paginação
@@ -66,7 +68,7 @@ public class SearchController {
             model.addAttribute("totalResults", totalResults);
             model.addAttribute("query", query);
         }
-        return "index";
+        return "index"; // Diz ao Spring para renderizar o index.html
     }
 
     // --- 2. INDEXAR HACKER NEWS (ATUALIZADO) ---
@@ -91,12 +93,11 @@ public class SearchController {
             attrs.addFlashAttribute("msgType", "success");
         }
 
-        // --- A ALTERAÇÃO MÁGICA ESTÁ AQUI ---
         // Adiciona a query ao URL de destino.
         // O resultado será um redirecionamento para "/?q=termo_pesquisado"
         attrs.addAttribute("q", query);
 
-        return "redirect:/";
+        return "redirect:/"; // Reinicia a página evitando que o user reenvia se fizer F5
     }
 
     // --- 3. INDEXAR URL MANUAL ---
