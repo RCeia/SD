@@ -15,6 +15,22 @@ import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
 import java.net.ConnectException;
 
+/**
+ * Implementação do Gateway de pesquisa (RMI).
+ * <p>
+ * O Gateway atua como o ponto central de coordenação do sistema. As suas principais responsabilidades incluem:
+ * <ul>
+ * <li>Servir como ponto de entrada para clientes e administradores.</li>
+ * <li>Balanceamento de carga entre os Barrels disponíveis (baseado em tempos de resposta).</li>
+ * <li>Tolerância a falhas (reconexão e retry logic).</li>
+ * <li>Agregação de estatísticas do sistema e notificação em tempo real via Callbacks.</li>
+ * <li>Monitorização da "saúde" dos Barrels (Heartbeat).</li>
+ * </ul>
+ * </p>
+ *
+ * @author Ivan, Rodrigo e Samuel
+ * @version 2.0
+ */
 public class Gateway extends UnicastRemoteObject implements IGateway {
 
     private final IQueue queue;
@@ -34,6 +50,16 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
     // Lista de clientes RMI (Spring Boot) subscritos
     private final List<IClientCallback> subscribedClients;
 
+    /**
+     * Construtor do Gateway.
+     * <p>
+     * Inicializa as estruturas de dados, conecta-se ao RMI Registry local,
+     * localiza a fila de URLs (URLQueue) e descobre automaticamente quaisquer
+     * Barrels já registados no sistema. Inicia também a thread de monitorização (Heartbeat).
+     * </p>
+     *
+     * @throws RemoteException Se ocorrer um erro crítico no arranque do servidor RMI.
+     */
     public Gateway() throws RemoteException {
         super();
         this.barrels = new HashMap<>();
@@ -79,6 +105,16 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
 
     // --- GESTÃO DE SUBSCRIÇÕES (ATUALIZADO PARA OBJETOS) ---
 
+    /**
+     * Subscreve um cliente para receber atualizações de estatísticas em tempo real.
+     * <p>
+     * Se existirem estatísticas atuais disponíveis, estas são enviadas imediatamente
+     * ao cliente para popular o dashboard inicial.
+     * </p>
+     *
+     * @param client A referência para a interface de callback do cliente.
+     * @throws RemoteException Se falhar a comunicação com o cliente.
+     */
     @Override
     public synchronized void subscribe(IClientCallback client) throws RemoteException {
         if (!subscribedClients.contains(client)) {
@@ -98,12 +134,25 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         }
     }
 
+    /**
+     * Remove a subscrição de um cliente, parando o envio de atualizações.
+     *
+     * @param client A referência para a interface de callback do cliente a remover.
+     * @throws RemoteException Se ocorrer um erro RMI.
+     */
     @Override
     public synchronized void unsubscribe(IClientCallback client) throws RemoteException {
         subscribedClients.remove(client);
         System.out.println("[Gateway] Cliente removeu subscrição.");
     }
 
+    /**
+     * Inicia uma thread em background para monitorizar a saúde dos Barrels (Heartbeat).
+     * <p>
+     * Verifica periodicamente se os Barrels registados respondem. Se um Barrel não responder,
+     * é considerado "morto" e removido das listas de balanceamento e estatísticas.
+     * </p>
+     */
     private void startHeartbeatMonitor() {
         new Thread(() -> {
             while (true) {
@@ -149,6 +198,10 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         }).start();
     }
 
+    /**
+     * Notifica todos os clientes subscritos com as estatísticas mais recentes do sistema.
+     * Remove automaticamente clientes que não estejam acessíveis.
+     */
     private void notifyClients() {
         // Se ainda não há dados, não vale a pena notificar
         if (currentStats == null) return;
@@ -180,6 +233,17 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
 
     // --- LÓGICA PRINCIPAL (SEARCH / INDEX / LINKS) ---
 
+    /**
+     * Seleciona o melhor Barrel para processar um pedido.
+     * <p>
+     * A estratégia de seleção é:
+     * 1. Barrel com menor tempo médio de resposta.
+     * 2. Se não houver dados históricos suficiente, um Barrel nunca usado.
+     * 3. Aleatório ou o primeiro disponível.
+     * </p>
+     *
+     * @return A referência para o Barrel escolhido ou null se não houver nenhum disponível.
+     */
     private IBarrel chooseBarrel() {
         synchronized (barrels) {
             if (barrels.isEmpty()) return null;
@@ -214,6 +278,12 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         }
     }
 
+    /**
+     * Tenta restabelecer a ligação com um Barrel através do seu nome no RMI Registry.
+     *
+     * @param barrelName O nome do Barrel a reconectar.
+     * @return true se a reconexão for bem sucedida, false caso contrário.
+     */
     private boolean tryReconnect(String barrelName) {
         try {
             Registry registry = LocateRegistry.getRegistry("localhost", 1099);
@@ -225,6 +295,13 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         }
     }
 
+    /**
+     * Envia um URL para a fila de indexação.
+     *
+     * @param url O URL a ser indexado.
+     * @return Mensagem de estado sobre a operação.
+     * @throws RemoteException Se ocorrer erro na comunicação RMI.
+     */
     @Override
     public String indexURL(String url) throws RemoteException {
         if (queue != null) {
@@ -234,6 +311,17 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         return "Erro: Queue indisponível.";
     }
 
+    /**
+     * Realiza uma pesquisa nos Barrels disponíveis utilizando lógica de tentativas (Retry).
+     * <p>
+     * Seleciona um Barrel, executa a pesquisa e mede o tempo de resposta.
+     * Em caso de falha, tenta reconectar ou seleciona outro Barrel.
+     * </p>
+     *
+     * @param terms Lista de termos a pesquisar.
+     * @return Mapa de URLs e metadados encontrados.
+     * @throws RemoteException Se todos os Barrels falharem.
+     */
     @Override
     public Map<String, UrlMetadata> search(List<String> terms) throws RemoteException {
         synchronized (barrels) {
@@ -272,6 +360,13 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         return new HashMap<>(); // Retorna vazio se falhar tudo
     }
 
+    /**
+     * Obtém os links que apontam para um determinado URL (Incoming Links).
+     *
+     * @param url O URL de destino.
+     * @return Lista de URLs que apontam para o destino.
+     * @throws RemoteException Se ocorrer erro na comunicação RMI.
+     */
     @Override
     public List<String> getIncomingLinks(String url) throws RemoteException {
         synchronized (barrels) {
@@ -310,6 +405,15 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         return new ArrayList<>();
     }
 
+    /**
+     * Trata falhas de comunicação com Barrels.
+     * Se a falha for de conexão (recusada), remove o Barrel do sistema.
+     *
+     * @param chosen O Barrel que falhou.
+     * @param e A exceção capturada.
+     * @param context O nome do método onde ocorreu a falha.
+     * @throws RemoteException Se a exceção não for de conexão (relança).
+     */
     private void handleBarrelFailure(IBarrel chosen, RemoteException e, String context) throws RemoteException {
         if (isConnectionRefused(e)) {
             System.out.println("[Gateway] Barrel removido durante " + context + ": " + extractBarrelName(chosen));
@@ -329,6 +433,14 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
 
     // --- ESTATÍSTICAS DO SISTEMA (CONSTRUÇÃO DO OBJETO) ---
 
+    /**
+     * Recebe e atualiza os tamanhos dos índices reportados por um Barrel.
+     *
+     * @param barrel O Barrel que reporta.
+     * @param invertedSize Tamanho do índice invertido.
+     * @param incomingSize Tamanho do índice de links.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public void updateBarrelIndexSize(IBarrel barrel, int invertedSize, int incomingSize) throws RemoteException {
         synchronized (barrels) {
@@ -338,6 +450,11 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         }
     }
 
+    /**
+     * Recalcula as estatísticas globais do sistema e notifica os clientes.
+     * Cria um snapshot (`SystemStatistics`) contendo frequência de termos, URLs
+     * e estado de cada Barrel.
+     */
     private void updateSystemStatistics() {
         synchronized (barrels) {
             List<BarrelStats> barrelStatsList = new ArrayList<>();
@@ -378,6 +495,14 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         notifyClients();
     }
 
+    /**
+     * Atualiza os contadores internos de frequência de pesquisa e tempos de resposta.
+     *
+     * @param barrel O Barrel que respondeu.
+     * @param terms Termos pesquisados (para estatística).
+     * @param urls URLs envolvidos (para estatística).
+     * @param elapsed Tempo decorrido na operação.
+     */
     private void updateInternalStats(IBarrel barrel, List<String> terms, List<String> urls, long elapsed) {
         for (String t : terms) {
             // LÓGICA NOVA: Remove a tag [PAGE:X] antes de contar para a estatística
@@ -405,6 +530,12 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
 
     // --- MÉTODOS AUXILIARES ---
 
+    /**
+     * Regista um novo Barrel no Gateway.
+     *
+     * @param barrel A referência para o Barrel.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public synchronized void registerBarrel(IBarrel barrel) throws RemoteException {
         if (!barrels.containsKey(barrel)) {
@@ -418,6 +549,13 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         }
     }
 
+    /**
+     * Ordena resultados baseando-se no número de incoming links.
+     *
+     * @param unsortedResults O mapa de resultados não ordenados.
+     * @param barrel O barrel para consultar contagens de links.
+     * @return Mapa ordenado.
+     */
     private Map<String, UrlMetadata> sortByIncomingLinks(Map<String, UrlMetadata> unsortedResults, IBarrel barrel) {
         List<Map.Entry<String, UrlMetadata>> list = new ArrayList<>(unsortedResults.entrySet());
         list.sort((e1, e2) -> {
@@ -432,6 +570,12 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         return sorted;
     }
 
+    /**
+     * Verifica se uma exceção RMI foi causada por recusa de conexão.
+     *
+     * @param e A exceção RemoteException.
+     * @return true se a causa raiz for ConnectException.
+     */
     private boolean isConnectionRefused(RemoteException e) {
         Throwable cause = e.getCause();
         while (cause != null) {
@@ -441,10 +585,21 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
         return false;
     }
 
+    /**
+     * Tenta extrair o nome do Barrel (método getName) de forma segura.
+     *
+     * @param barrel O objeto Barrel.
+     * @return O nome do Barrel ou "Barrel (N/A)" em caso de erro.
+     */
     private String extractBarrelName(IBarrel barrel) {
         try { return barrel.getName(); } catch (Exception e) { return "Barrel (N/A)"; }
     }
 
+    /**
+     * Método principal (Main) para iniciar o serviço Gateway.
+     *
+     * @param args Argumentos de linha de comando.
+     */
     public static void main(String[] args) {
         try {
             // ALTERAÇÃO: Força o uso do localhost para evitar erros de rede (192.168.x.x)

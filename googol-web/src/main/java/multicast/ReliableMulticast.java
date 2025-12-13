@@ -8,13 +8,47 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
 
+/**
+ * Classe responsável pelo envio de dados em modo multicast fiável para múltiplos Barrels.
+ * <p>
+ * Esta classe gere o envio paralelo de dados, lidando com retransmissões automáticas,
+ * timeouts e espera exponencial (backoff) em caso de falhas temporárias.
+ * </p>
+ *
+ * @author Ivan, Rodrigo e Samuel
+ * @version 1.0
+ */
 public class ReliableMulticast {
 
+    /**
+     * Número máximo de tentativas de reenvio em caso de falha.
+     */
     private final int maxRetries;
+
+    /**
+     * Tempo limite (em milissegundos) para aguardar a confirmação (ACK) de um Barrel.
+     */
     private final int ackTimeoutMs;
+
+    /**
+     * Pool de threads para gestão de envios concorrentes.
+     */
     private final ExecutorService executor;
+
+    /**
+     * Fator base para o cálculo do tempo de espera exponencial entre tentativas (Backoff).
+     */
     private final int backoffFactor; // Backoff exponencial
 
+    /**
+     * Construtor da classe ReliableMulticast.
+     * Inicializa as configurações de retentativa, timeout e gestão de threads.
+     *
+     * @param maxRetries Número máximo de tentativas de envio por Barrel.
+     * @param ackTimeoutMs Tempo limite de espera por resposta em milissegundos.
+     * @param maxThreads Número máximo de threads simultâneas para envio.
+     * @param backoffFactor Fator de multiplicação para o tempo de espera entre falhas.
+     */
     public ReliableMulticast(int maxRetries, int ackTimeoutMs, int maxThreads, int backoffFactor) {
         this.maxRetries = maxRetries;
         this.ackTimeoutMs = ackTimeoutMs;
@@ -22,6 +56,19 @@ public class ReliableMulticast {
         this.backoffFactor = backoffFactor;
     }
 
+    /**
+     * Envia um objeto {@code PageData} para uma lista de Barrels.
+     * <p>
+     * O método tenta enviar os dados para todos os Barrels fornecidos. Se algum falhar
+     * ou exceder o tempo limite, o sistema aguarda um tempo (baseado no backoff factor)
+     * e tenta novamente até atingir o número máximo de tentativas (`maxRetries`).
+     * </p>
+     *
+     * @param barrels Lista de interfaces remotas dos Barrels de destino.
+     * @param data O objeto contendo os dados da página a ser armazenada.
+     * @return Uma lista contendo os Barrels que falharam definitivamente após todas as tentativas.
+     * Retorna uma lista vazia se todos confirmarem o recebimento com sucesso.
+     */
     public List<IBarrel> multicastToBarrels(List<IBarrel> barrels, PageData data) {
         if (barrels == null || barrels.isEmpty()) {
             System.err.println("[Multicast] Nenhum barrel disponível!");

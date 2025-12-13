@@ -13,24 +13,59 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Serviço de integração com a API da OpenAI (ChatGPT).
+ * <p>
+ * Utilizado para gerar resumos contextuais curtos sobre os termos pesquisados
+ * pelo utilizador, enriquecendo a página de resultados.
+ * </p>
+ *
+ * @author Ivan, Rodrigo e Samuel
+ * @version 1.0
+ */
 @Service
 public class OpenAIService {
 
+    /**
+     * Chave da API injetada via configuração (application.properties).
+     */
     @Value("${openai.api.key}")
     private String apiKey;
 
+    /**
+     * Modelo da OpenAI a utilizar (ex: gpt-3.5-turbo).
+     */
     @Value("${openai.model}")
     private String model;
 
+    /**
+     * Endpoint da API da OpenAI.
+     */
     @Value("${openai.url}")
     private String apiUrl;
 
+    /**
+     * Cliente REST para comunicação HTTP.
+     */
     private final RestTemplate restTemplate;
 
+    /**
+     * Construtor do serviço.
+     */
     public OpenAIService() {
         this.restTemplate = new RestTemplate();
     }
 
+    /**
+     * Gera um resumo curto sobre o termo de pesquisa.
+     * <p>
+     * Envia um prompt específico ("Forneça uma explicação muito breve...") para a API
+     * e processa a resposta JSON para extrair apenas o texto relevante.
+     * </p>
+     *
+     * @param query O termo de pesquisa do utilizador.
+     * @return Uma string com o resumo gerado, ou {@code null} em caso de erro ou falta de configuração.
+     */
     public String generateSummary(String query) {
         // Se não houver chave configurada, não faz nada (evita erros)
         if (apiKey == null || apiKey.contains("TUA_CHAVE") || apiKey.isEmpty()) {

@@ -12,18 +12,63 @@ import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
 import java.net.InetAddress;
 
+/**
+ * Implementação do nó de armazenamento (Barrel) do motor de busca.
+ * <p>
+ * Esta classe gere três estruturas de dados principais:
+ * <ul>
+ * <li><b>Índice Invertido:</b> Mapeia palavras para URLs.</li>
+ * <li><b>Links de Entrada:</b> Mapeia URLs para quem aponta para eles (para ranking).</li>
+ * <li><b>Metadados:</b> Guarda títulos e citações para exibição rápida.</li>
+ * </ul>
+ * <p>
+ * O Barrel possui também lógica de sincronização automática ao iniciar (copia dados de pares existentes)
+ * e reporta o seu estado e carga ao Gateway.
+ * </p>
+ *
+ * @author Ivan, Rodrigo e Samuel
+ * @version 2.0
+ */
 public class Barrel extends UnicastRemoteObject implements IBarrel {
 
     // Estruturas de Dados
+    /**
+     * Estrutura principal de pesquisa: Termo -> Conjunto de URLs que o contêm.
+     */
     private final Map<String, Set<String>> invertedIndex = new HashMap<>();
+
+    /**
+     * Grafo de ligações: URL Destino -> Conjunto de URLs Origem. Usado para ranking.
+     */
     private final Map<String, Set<String>> incomingLinks = new HashMap<>();
+
+    /**
+     * Armazenamento de informação de exibição: URL -> (Título, Citação).
+     */
     private final Map<String, UrlMetadata> pageMetadata = new HashMap<>();
+
+    /**
+     * Referência para o Gateway central.
+     */
     private IGateway gateway;
 
     // Estado do Barrel
+    /**
+     * Nome único deste Barrel.
+     */
     private final String name;
+
+    /**
+     * Flag que indica se o Barrel completou a sincronização e está pronto para servir pedidos.
+     */
     private boolean isActive = false;
 
+    /**
+     * Construtor do Barrel.
+     *
+     * @param name O nome identificador do Barrel.
+     * @throws RemoteException Se ocorrer erro na exportação RMI.
+     */
     public Barrel(String name) throws RemoteException {
         super();
         this.name = name;
@@ -33,6 +78,16 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
     // IMPLEMENTAÇÃO DA INTERFACE IBarrel
     // =========================================================================
 
+    /**
+     * Armazena uma página recebida de um Downloader.
+     * <p>
+     * Se o Barrel não estiver ativo (ainda em sincronização), o pedido é ignorado.
+     * Caso contrário, atualiza todas as estruturas de dados e notifica o Gateway com novas estatísticas.
+     * </p>
+     *
+     * @param page Dados da página a armazenar.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public synchronized void storePage(PageData page) throws RemoteException {
         if (!isActive) {
@@ -50,6 +105,20 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         sendStatsToGateway("ACTIVE");
     }
 
+    /**
+     * Executa a lógica de pesquisa completa.
+     * <p>
+     * 1. Faz parse dos termos e deteta tags de paginação [PAGE:X].<br>
+     * 2. Recupera URLs do índice invertido.<br>
+     * 3. Ordena os resultados com base no número de incoming links (relevância).<br>
+     * 4. Aplica a paginação (ex: retorna apenas resultados 11-20).<br>
+     * 5. Inclui um metadado especial "##META_STATS##" com o total real de resultados.
+     * </p>
+     *
+     * @param terms Lista de termos de pesquisa.
+     * @return Mapa ordenado contendo os resultados da página solicitada.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public synchronized Map<String, UrlMetadata> search(List<String> terms) throws RemoteException {
         if (!isActive) return new HashMap<>();
@@ -122,45 +191,92 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
     }
 
     // Getters padrão da interface...
+
+    /**
+     * Retorna uma cópia profunda (Deep Copy) do índice invertido.
+     * @return Mapa duplicado do índice.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public synchronized Map<String, Set<String>> getInvertedIndex() throws RemoteException {
         return deepCopyMap(invertedIndex);
     }
 
+    /**
+     * Retorna uma cópia profunda (Deep Copy) do mapa de incoming links.
+     * @return Mapa duplicado dos links.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public synchronized Map<String, Set<String>> getIncomingLinksMap() throws RemoteException {
         return deepCopyMap(incomingLinks);
     }
 
+    /**
+     * Retorna uma cópia dos metadados.
+     * @return Mapa de metadados.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public synchronized Map<String, UrlMetadata> getPageMetadata() throws RemoteException {
         return new HashMap<>(pageMetadata);
     }
 
+    /**
+     * Retorna os links que apontam para um URL específico.
+     * @param url URL alvo.
+     * @return Conjunto de URLs de origem.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public synchronized Set<String> getIncomingLinks(String url) throws RemoteException {
         return incomingLinks.getOrDefault(url, Collections.emptySet());
     }
 
+    /**
+     * Obtém o número total de termos indexados.
+     * @return Tamanho do índice.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public int getIndexSize() throws RemoteException {
         return invertedIndex.size();
     }
 
+    /**
+     * Verifica se o Barrel está ativo.
+     * @return true se ativo, false se em sincronização.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public boolean isActive() throws RemoteException {
         return isActive;
     }
 
+    /**
+     * Obtém o nome do Barrel.
+     * @return Nome.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public String getName() throws RemoteException {
         return name;
     }
 
+    /**
+     * Define a referência para o Gateway.
+     * @param gateway Objeto remoto Gateway.
+     */
     public void setGateway(IGateway gateway) {
         this.gateway = gateway;
     }
 
+    /**
+     * Verifica se um URL é conhecido (está presente em algum valor do mapa de incoming links).
+     * @param url URL a verificar.
+     * @return true se encontrado.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public synchronized boolean isUrlInBarrel(String url) throws RemoteException {
         return incomingLinks.values().stream().anyMatch(set -> set.contains(url));
@@ -170,6 +286,12 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
     // MÉTODOS AUXILIARES
     // =========================================================================
 
+    /**
+     * Extrai e salva os metadados (Título e Citação) de uma página.
+     * A citação é gerada a partir das primeiras 20 palavras.
+     *
+     * @param page Dados da página.
+     */
     private void saveMetadata(PageData page) {
         String title = page.getTitle();
         List<String> words = page.getWords();
@@ -177,6 +299,12 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         pageMetadata.put(page.getUrl(), new UrlMetadata(title, citation));
     }
 
+    /**
+     * Gera uma string de citação com as primeiras palavras do texto.
+     *
+     * @param words Lista de palavras.
+     * @return String truncada.
+     */
     private String generateCitation(List<String> words) {
         if (words == null || words.isEmpty()) return "Sem descrição.";
         int limit = Math.min(words.size(), 20);
@@ -185,6 +313,11 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         return citation;
     }
 
+    /**
+     * Atualiza o índice invertido mapeando cada palavra da página ao seu URL.
+     *
+     * @param page Dados da página.
+     */
     private void updateInvertedIndex(PageData page) {
         if (page.getWords() == null) return;
         for (String word : page.getWords()) {
@@ -192,6 +325,12 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
     }
 
+    /**
+     * Atualiza o mapa de Incoming Links com base nos links de saída da página.
+     * Se a página P aponta para L, então L recebe P na sua lista de entrada.
+     *
+     * @param page Dados da página.
+     */
     private void updateIncomingLinks(PageData page) {
         if (page.getOutgoingLinks() == null) return;
         for (String link : page.getOutgoingLinks()) {
@@ -199,6 +338,13 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
     }
 
+    /**
+     * Cria uma cópia profunda de um mapa do tipo Map<String, Set<String>>.
+     * Necessário para garantir thread-safety e evitar ConcurrentModificationException durante a sincronização.
+     *
+     * @param original O mapa original.
+     * @return Uma cópia independente.
+     */
     private Map<String, Set<String>> deepCopyMap(Map<String, Set<String>> original) {
         Map<String, Set<String>> copy = new HashMap<>();
         for (var entry : original.entrySet()) {
@@ -212,9 +358,13 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
     // =========================================================================
 
     /**
-     * NOVA VERSÃO: Recebe o status.
-     * Se status == "SYNCHING", envia 0 de carga.
-     * Se status == "ACTIVE", envia carga real.
+     * Envia as estatísticas atuais de carga para o Gateway.
+     * <p>
+     * Se o estado for "SYNCHING", reporta tamanho 0 para evitar que o Gateway
+     * encaminhe pesquisas para este nó enquanto ele ainda está a carregar dados.
+     * </p>
+     *
+     * @param status String indicando o estado ("ACTIVE" ou "SYNCHING").
      */
     private void sendStatsToGateway(String status) {
         try {
@@ -240,6 +390,15 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
     }
 
+    /**
+     * Tenta descobrir outros Barrels na rede para sincronizar dados.
+     * <p>
+     * Se encontrar outro Barrel ativo, copia os seus dados.
+     * Se não encontrar ninguém ou todos falharem, assume-se como o primeiro da rede.
+     * </p>
+     *
+     * @param registry O RMI Registry para lookup.
+     */
     private void discoverOtherBarrels(Registry registry) {
         try {
             // 1. ANTES DE TUDO: Avisar Gateway que existo mas estou a sincronizar (Zero Load)
@@ -259,6 +418,13 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
     }
 
+    /**
+     * Tenta realizar a sincronização (cópia de dados) a partir de um Barrel específico.
+     *
+     * @param registry O RMI Registry.
+     * @param barrelName O nome do Barrel alvo.
+     * @return true se a sincronização for bem sucedida.
+     */
     private boolean trySyncWith(Registry registry, String barrelName) {
         try {
             IBarrel other = (IBarrel) registry.lookup(barrelName);
@@ -274,6 +440,12 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
     }
 
+    /**
+     * Marca o Barrel como ativo e notifica componentes externos (Downloaders e Gateway).
+     *
+     * @param registry O RMI Registry.
+     * @param isFirst Indica se este é o primeiro Barrel da rede.
+     */
     private void activateBarrel(Registry registry, boolean isFirst) {
         System.out.println("[" + name + "] " + (isFirst ? "Primeiro da rede." : "Sync concluído.") + " A ativar...");
         this.isActive = true;
@@ -286,6 +458,12 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         System.out.println("[" + name + "] Barrel operacional.");
     }
 
+    /**
+     * Copia todos os dados (índice, links, metadados) de outro Barrel.
+     *
+     * @param barrel A referência remota do Barrel fonte.
+     * @throws RemoteException Se ocorrer erro na transferência.
+     */
     private synchronized void copyIndexFrom(IBarrel barrel) throws RemoteException {
         try {
             Map<String, Set<String>> otherIndex = barrel.getInvertedIndex();
@@ -300,6 +478,12 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
     }
 
+    /**
+     * Método auxiliar para fundir dois mapas de conjuntos.
+     *
+     * @param target Mapa de destino.
+     * @param source Mapa de origem.
+     */
     private void mergeMap(Map<String, Set<String>> target, Map<String, Set<String>> source) {
         for (var entry : source.entrySet()) {
             target.merge(entry.getKey(), entry.getValue(), (a, b) -> {
@@ -309,6 +493,11 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
     }
 
+    /**
+     * Procura por Downloaders na rede e regista-se neles para começar a receber URLs.
+     *
+     * @param registry O RMI Registry.
+     */
     private void notifyDownloadersActive(Registry registry) {
         try {
             for (String bound : registry.list()) {
@@ -322,6 +511,9 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         } catch (Exception ignored) {}
     }
 
+    /**
+     * Imprime no terminal o estado atual do Barrel.
+     */
     public synchronized void printStoredLinks() {
         System.out.println("\n===== [" + name + "] ESTADO =====");
         System.out.println("Status: " + (isActive ? "ACTIVE" : "SYNCHING"));
@@ -336,6 +528,18 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
     // =========================================================================
     // MAIN
     // =========================================================================
+
+    /**
+     * Método principal de arranque do servidor Barrel.
+     * <p>
+     * 1. Regista-se no RMI.<br>
+     * 2. Espera pela conexão com o Gateway.<br>
+     * 3. Inicia o processo de sincronização/descoberta.<br>
+     * 4. Inicia uma thread para comandos de consola.
+     * </p>
+     *
+     * @param args Argumentos de linha de comando: [0] Host do Registry, [1] Porta do Registry.
+     */
     public static void main(String[] args) {
         try {
             String name = "Barrel" + (ProcessHandle.current().pid());
@@ -367,7 +571,13 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
     }
 
-    // Função de espera bloqueante simples
+    /**
+     * Loop infinito até encontrar o Gateway no registo RMI.
+     *
+     * @param registry Referência para o Registry.
+     * @param barrel A instância local do Barrel.
+     * @param name Nome do Barrel para logs.
+     */
     private static void waitForGateway(Registry registry, Barrel barrel, String name) {
         System.out.println("[" + name + "] A procurar Gateway...");
         while (true) {
@@ -383,6 +593,13 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
         }
     }
 
+    /**
+     * Inicia uma thread para processar comandos de consola (ex: "show", "exit").
+     *
+     * @param registry Referência para o Registry.
+     * @param barrel A instância local do Barrel.
+     * @param name Nome do Barrel.
+     */
     private static void startConsoleHandler(Registry registry, Barrel barrel, String name) {
         new Thread(() -> {
             Scanner sc = new Scanner(System.in);

@@ -11,23 +11,56 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.util.*;
 
+/**
+ * Serviço Spring que atua como ponte entre a aplicação Web e o sistema Googol (RMI).
+ * <p>
+ * Responsável por:
+ * <ul>
+ * <li>Manter a ligação RMI com o Gateway.</li>
+ * <li>Encaminhar pesquisas e pedidos de indexação.</li>
+ * <li>Gerir a subscrição para receber estatísticas em tempo real.</li>
+ * <li>Aplicar filtros de Stop Words antes de enviar as pesquisas.</li>
+ * </ul>
+ * </p>
+ *
+ * @author Ivan, Rodrigo e Samuel
+ * @version 1.0
+ */
 @Service
 public class GoogolService {
 
+    /**
+     * Referência para o objeto remoto Gateway.
+     */
     private IGateway gateway;
 
+    /**
+     * Referência para o serviço remoto de identificação de Stop Words.
+     */
     private adaptivestopwords.IAdaptiveStopWords stopWordsService;
 
+    /**
+     * Construtor padrão do serviço.
+     */
     public GoogolService() {
     }
 
+    /**
+     * Inicializa a conexão com o Gateway RMI após a construção do Bean Spring.
+     * Anotado com {@code @PostConstruct} para garantir execução automática.
+     */
     @PostConstruct // Poderia estar no construtor mas é boa prática do spring
     public void init() {
         connectToGateway();
     }
 
     /**
-     * Conecta à gateway e junta-se à lista de subscribers para receber estatisticas em tempo real
+     * Estabelece a ligação RMI com o Gateway e subscreve-se para receber atualizações.
+     * <p>
+     * Cria uma instância de {@code RmiClientListener} e regista-a no Gateway via
+     * {@code subscribe()}, permitindo que o servidor web receba notificações (push)
+     * sobre o estado do sistema (estatísticas).
+     * </p>
      */
     private void connectToGateway() {
         try {
@@ -51,11 +84,20 @@ public class GoogolService {
     }
 
     // --- Métodos de Pesquisa ---
+
     /**
-     * Devolve uma lista dos termos a pesquisar e devolve os resultados da pesquisa
-     * @param query Termos a pesquisar
-     * @param page Número da página (1, 2, 3...)
-     * @return resultados da pesquisa
+     * Realiza uma pesquisa no sistema Googol com suporte a paginação e filtragem de Stop Words.
+     * <p>
+     * O método:
+     * 1. Divide a query em termos.
+     * 2. Remove termos identificados como Stop Words pelo serviço remoto.
+     * 3. Adiciona a tag de paginação {@code [PAGE:X]} ao primeiro termo da lista, se necessário.
+     * 4. Invoca o método de pesquisa do Gateway.
+     * </p>
+     *
+     * @param query A string contendo os termos a pesquisar.
+     * @param page O número da página de resultados pretendida (>= 1).
+     * @return Um mapa contendo os URLs encontrados e os seus metadados. Retorna vazio em caso de erro.
      */
     public Map<String, UrlMetadata> search(String query, int page) { // <--- 1. ADICIONAR int page
         try {
@@ -100,9 +142,10 @@ public class GoogolService {
     }
 
     /**
-     * Envia para a queue o URL passado como parâmetro para ser indexado
-     * @param url
-     * @return boolean que indica sucesso da operação
+     * Envia um URL para a fila de indexação do sistema.
+     *
+     * @param url O URL a ser indexado.
+     * @return {@code true} se a operação for bem sucedida, {@code false} caso contrário.
      */
     public boolean indexURL(String url) {
         try {
@@ -119,9 +162,10 @@ public class GoogolService {
     }
 
     /**
-     * Devolve os URLs que apontam para um URL passado como parâmetro
-     * @param url
-     * @return incomingLinks
+     * Obtém a lista de URLs que apontam para um determinado URL (Backlinks).
+     *
+     * @param url O URL alvo.
+     * @return Uma lista de strings com os URLs de origem.
      */
     public List<String> getIncomingLinks(String url) {
         try {

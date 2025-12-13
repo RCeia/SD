@@ -23,23 +23,85 @@ import barrel.IBarrel;
 import java.util.ArrayList;
 import java.net.InetAddress;
 
+/**
+ * Implementação do componente Downloader (Crawler).
+ * <p>
+ * Esta classe é responsável por:
+ * <ul>
+ * <li>Receber URLs da Queue via RMI.</li>
+ * <li>Baixar e fazer parsing do conteúdo HTML (usando Jsoup).</li>
+ * <li>Tokenizar o texto e comunicar com o serviço de StopWords adaptativas.</li>
+ * <li>Enviar os dados processados para os Barrels via Multicast fiável.</li>
+ * <li>Extrair novos links e enviá-los de volta para a Queue.</li>
+ * </ul>
+ * </p>
+ *
+ * @author Ivan, Rodrigo e Samuel
+ * @version 2.0
+ */
 public class Downloader implements IDownloader {
+
+    /**
+     * Contador estático para gerar IDs únicos para os Downloaders neste processo.
+     */
     private static int nextId = 1;
+
+    /**
+     * Identificador único deste Downloader.
+     */
     final int id;
+
+    /**
+     * Endereço do host onde corre o RMI Registry principal.
+     */
     private final String registryHost;
+
+    /**
+     * Porta do RMI Registry principal.
+     */
     private final int registryPort;
 
+    /**
+     * Referência para a interface remota da Queue.
+     */
     private IQueue queue;
+
+    /**
+     * Lista local de Barrels conhecidos e ativos.
+     */
     private List<IBarrel> barrels = new ArrayList<>();
+
+    /**
+     * Objeto responsável pelo envio multicast fiável para os Barrels.
+     */
     private ReliableMulticast multicast;
+
+    /**
+     * Objeto de monitor para sincronização de acesso à lista de Barrels.
+     */
     private final Object barrelLock = new Object();
 
     //                 Campos para o algoritmo stop words
     // ======================================================================
+    /**
+     * Interface remota para o serviço de palavras de paragem (Stop Words) adaptativas.
+     */
     private IAdaptiveStopWords adaptiveStopWords;
+
+    /**
+     * Utilitário para dividir texto em tokens (palavras).
+     */
     private final Tokenizer tokenizer = new Tokenizer();
     // ======================================================================
 
+    /**
+     * Construtor do Downloader.
+     * Inicializa a identificação, descobre serviços (Barrels e StopWords) e configura o multicast.
+     *
+     * @param queue A referência inicial para a Queue.
+     * @param registryHost O endereço IP do registo RMI.
+     * @param registryPort A porta do registo RMI.
+     */
     public Downloader(IQueue queue, String registryHost, int registryPort) {
         super();
         this.queue = queue;
@@ -52,6 +114,13 @@ public class Downloader implements IDownloader {
         this.multicast = new ReliableMulticast(3, 2000, 10, 2);
     }
 
+    /**
+     * Recebe e inicia o processamento de um URL.
+     * Bloqueia se não houver Barrels ativos disponíveis.
+     *
+     * @param url O URL a processar.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public void takeURL(String url) throws RemoteException {
         synchronized (barrelLock) {
@@ -67,6 +136,11 @@ public class Downloader implements IDownloader {
         download(url);
     }
 
+    /**
+     * Tenta adicionar um URL à Queue de forma segura, com lógica de re-tentativa.
+     *
+     * @param url O URL a adicionar.
+     */
     private void safeAddURL(String url) {
         try {
             RetryLogic.executeWithRetry(3, 2000, this::reconnectQueue,
@@ -80,6 +154,11 @@ public class Downloader implements IDownloader {
         }
     }
 
+    /**
+     * Tenta adicionar uma lista de URLs à Queue de forma segura.
+     *
+     * @param urls Lista de URLs a adicionar.
+     */
     private void safeAddURLs(List<String> urls) {
         try {
             RetryLogic.executeWithRetry(3, 2000, this::reconnectQueue,
@@ -93,6 +172,13 @@ public class Downloader implements IDownloader {
         }
     }
 
+    /**
+     * Envia os dados da página processada para todos os Barrels ativos.
+     * Utiliza multicast lógico e remove Barrels que falhem consistentemente.
+     *
+     * @param data Objeto PageData contendo título, URL e palavras.
+     * @throws RemoteException Se ocorrer erro na comunicação.
+     */
     private void sendToBarrels(PageData data) throws RemoteException {
         if (barrels.isEmpty()) {
             System.err.println("[Downloader" + id + "] - Nenhum Barrel ativo disponível. URL será re-adicionado à Queue.");
@@ -116,8 +202,9 @@ public class Downloader implements IDownloader {
     }
 
     /**
-     * AQUI estava um bug: estavas a fazer sempre getRegistry(registryHost, 1099)
-     * mesmo que o servidor esteja noutra porta.
+     * Tenta reconectar à Queue em caso de falha de comunicação.
+     *
+     * @return true se a reconexão for bem sucedida, false caso contrário.
      */
     private boolean reconnectQueue() {
         try {
@@ -133,6 +220,11 @@ public class Downloader implements IDownloader {
         }
     }
 
+    /**
+     * Notifica a Queue de que o Downloader está livre.
+     *
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public void notifyFinished() throws RemoteException {
         System.out.println("[Downloader" + id + "] - Download finished, notifying Queue...");
@@ -149,6 +241,13 @@ public class Downloader implements IDownloader {
         }
     }
 
+    /**
+     * Lógica principal de download e processamento de uma página.
+     * Executa numa thread separada para não bloquear o RMI.
+     * Realiza: validação, verificação de duplicados, download Jsoup, tokenização e envio.
+     *
+     * @param url O URL a ser baixado.
+     */
     private void download(String url) {
         new Thread(() -> {
             // Flag para decidir se o URL deve ser re-adicionado à Queue em caso de falha.
@@ -224,7 +323,7 @@ public class Downloader implements IDownloader {
                     return;
                 }
 
-                // Enviar palavras para o algoritmo de aprendizagem de stop words                
+                // Enviar palavras para o algoritmo de aprendizagem de stop words
                 Set<String> uniqueWords = new HashSet<>(allWords);
                 adaptiveStopWords.processDoc(url, uniqueWords);
 
@@ -290,6 +389,10 @@ public class Downloader implements IDownloader {
         }).start();
     }
 
+    /**
+     * Descobre e conecta-se aos serviços remotos disponíveis (Barrels e AdaptiveStopWords).
+     * Consulta o RMI Registry e popula as listas locais.
+     */
     private void discoverServices() {
         try {
             Registry registry = LocateRegistry.getRegistry(registryHost, registryPort);
@@ -336,6 +439,13 @@ public class Downloader implements IDownloader {
         }
     }
 
+    /**
+     * Adiciona um novo Barrel à lista local, caso esteja ativo e não exista.
+     * Método chamado via callback (interface IDownloader).
+     *
+     * @param newBarrel O novo Barrel a ser adicionado.
+     * @throws RemoteException Se ocorrer erro RMI.
+     */
     @Override
     public void addBarrel(IBarrel newBarrel) throws RemoteException {
         synchronized (barrelLock) {
@@ -353,6 +463,12 @@ public class Downloader implements IDownloader {
         }
     }
 
+    /**
+     * Método principal para iniciar o processo Downloader.
+     * Define o hostname, conecta ao registo, exporta o objeto e regista-se na Queue.
+     *
+     * @param args Argumentos de linha de comando: [0] IP servidor, [1] Porta servidor, [2] IP público local.
+     */
     public static void main(String[] args) {
         try {
             // args:

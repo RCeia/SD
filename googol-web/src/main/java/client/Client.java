@@ -15,29 +15,95 @@ import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
 import java.util.regex.Pattern;
 
+/**
+ * Cliente RMI (Consola) para o motor de busca Googol.
+ * <p>
+ * Esta classe fornece uma interface de linha de comandos (CLI) que permite aos utilizadores:
+ * <ul>
+ * <li>Enviar URLs para indexação.</li>
+ * <li>Pesquisar páginas (com filtragem de Stop Words).</li>
+ * <li>Consultar links de entrada (incoming links).</li>
+ * <li>Visualizar um dashboard em tempo real com estatísticas do sistema.</li>
+ * </ul>
+ * </p>
+ *
+ * @author Ivan, Rodrigo e Samuel
+ * @version 1.0
+ */
 public class Client {
 
+    /**
+     * Limite de tentativas de reconexão em caso de falha de comunicação.
+     */
     private static final int RETRY_LIMIT = 3;
+
+    /**
+     * Tempo de espera (em ms) entre tentativas de reconexão.
+     */
     private static final long RETRY_DELAY = 1000;
+
+    /**
+     * Lista de hosts onde o Gateway pode estar a correr (atualmente apenas localhost).
+     */
     private static final String[] GATEWAY_HOSTS = {"localhost"};
+
+    /**
+     * Referência remota para o serviço Gateway.
+     */
     private static IGateway gateway = null;
 
+    /**
+     * Cache local dos últimos resultados de pesquisa (URLs) para paginação.
+     */
     private static List<String> lastSearchResults = new ArrayList<>();
+
+    /**
+     * Cache local dos metadados (títulos/citações) da última pesquisa.
+     */
     private static Map<String, UrlMetadata> lastSearchDescriptions = new HashMap<>();
+
+    /**
+     * Cache local dos últimos links de entrada consultados para paginação.
+     */
     private static List<String> lastIncomingLinks = new ArrayList<>();
 
     // [SERVIÇO DE STOP WORDS]
+    /**
+     * Referência remota para o serviço de identificação de Stop Words.
+     */
     private static adaptivestopwords.IAdaptiveStopWords stopWordsService = null;
 
     // -------------------------------------------------------------------------
     // [ATUALIZADO] Callback agora recebe o Objeto SystemStatistics
     // -------------------------------------------------------------------------
+
+    /**
+     * Implementação interna da interface de callback para receber atualizações do Dashboard.
+     * <p>
+     * Esta classe é exportada como objeto remoto para permitir que o Gateway envie
+     * dados estatísticos (push) para o Cliente.
+     * </p>
+     */
     private static class ClientCallbackImpl extends UnicastRemoteObject implements IClientCallback {
 
+        /**
+         * Construtor do callback.
+         *
+         * @throws RemoteException Se ocorrer erro na exportação do objeto.
+         */
         protected ClientCallbackImpl() throws RemoteException {
             super();
         }
 
+        /**
+         * Método invocado remotamente pelo Gateway quando há novas estatísticas.
+         * <p>
+         * Exibe na consola o Top 10 de pesquisas, Top 10 de URLs e o estado de carga dos Barrels.
+         * </p>
+         *
+         * @param stats Objeto {@code SystemStatistics} contendo os dados atualizados.
+         * @throws RemoteException Se ocorrer erro na comunicação.
+         */
         @Override
         public void onStatisticsUpdated(SystemStatistics stats) throws RemoteException {
             System.out.println("\n\n");
@@ -84,7 +150,11 @@ public class Client {
             System.out.print("> ");
         }
 
-        // Método auxiliar para ordenar e imprimir o Top 10 a partir do Mapa
+        /**
+         * Método auxiliar para ordenar e imprimir o Top 10 de um mapa de frequências.
+         *
+         * @param map Mapa contendo Item -> Frequência.
+         */
         private void printTopMap(Map<String, Integer> map) {
             if (map == null || map.isEmpty()) {
                 System.out.println(" (Sem dados)");
@@ -101,6 +171,13 @@ public class Client {
     // -------------------------------------------------------------------------
     // Conexão
     // -------------------------------------------------------------------------
+
+    /**
+     * Estabelece a conexão inicial com o Gateway e o serviço de Stop Words via RMI.
+     * Tenta conectar-se aos hosts definidos em {@code GATEWAY_HOSTS} com retentativas.
+     *
+     * @return true se a conexão for bem-sucedida, false caso contrário.
+     */
     public static boolean connectToGateway() {
         for (int attempt = 0; attempt < RETRY_LIMIT; attempt++) {
             for (String host : GATEWAY_HOSTS) {
@@ -125,6 +202,11 @@ public class Client {
         return false;
     }
 
+    /**
+     * Tenta reconectar ao Gateway. Método auxiliar utilizado na lógica de Retry.
+     *
+     * @return true se a reconexão for bem-sucedida.
+     */
     public static boolean reconnectToGateway() {
         System.out.println("A tentar reconectar à Gateway...");
         boolean success = connectToGateway();
@@ -136,6 +218,11 @@ public class Client {
     // -------------------------------------------------------------------------
     // Menus
     // -------------------------------------------------------------------------
+
+    /**
+     * Exibe o menu principal e processa as escolhas do utilizador.
+     * Mantém o loop da aplicação até que o utilizador escolha sair.
+     */
     public static void showMenu() {
         Scanner scanner = new Scanner(System.in);
         while (true) {
@@ -184,6 +271,12 @@ public class Client {
     // Funcionalidades Principais
     // -------------------------------------------------------------------------
 
+    /**
+     * Envia um URL para ser indexado pelo sistema.
+     * Realiza validação de formato e utiliza retry logic.
+     *
+     * @param url O URL a indexar.
+     */
     public static void indexURL(String url) {
         if (!isValidURL(url)) {
             System.err.println("URL inválido (deve começar por http:// ou https://)");
@@ -202,6 +295,18 @@ public class Client {
         }
     }
 
+    /**
+     * Realiza a pesquisa de páginas com base numa string de termos.
+     * <p>
+     * O processo inclui:
+     * 1. Divisão da string em termos.
+     * 2. Consulta ao serviço de Stop Words para filtrar termos irrelevantes.
+     * 3. Envio dos termos filtrados ao Gateway.
+     * 4. Exibição paginada dos resultados.
+     * </p>
+     *
+     * @param searchTerm A string de pesquisa inserida pelo utilizador.
+     */
     public static void searchPages(String searchTerm) {
         try {
             if (searchTerm.isBlank()) return;
@@ -219,7 +324,7 @@ public class Client {
 
                     if (terms.isEmpty()) {
                         System.out.println("Nenhum resultado encontrado. (É Stop Word)");
-                    return;
+                        return;
                     }
                 } catch (RemoteException e) {
                     System.err.println("Aviso: Não foi possível aceder às stop words. Prosseguindo sem filtro.");
@@ -251,6 +356,11 @@ public class Client {
         }
     }
 
+    /**
+     * Consulta e exibe os links que apontam para um determinado URL (Backlinks).
+     *
+     * @param url O URL alvo.
+     */
     public static void getIncomingLinks(String url) {
         try {
             List<String> links = RetryLogic.executeWithRetry(
@@ -273,6 +383,16 @@ public class Client {
     }
 
     // [DASHBOARD] - Lógica mantém-se, apenas o callback interno mudou
+
+    /**
+     * Inicia o modo Dashboard, subscrevendo o cliente para atualizações em tempo real.
+     * <p>
+     * Cria uma instância de {@code ClientCallbackImpl}, regista-a no Gateway e
+     * bloqueia a execução até que o utilizador decida sair.
+     * </p>
+     *
+     * @param scanner Scanner para leitura da entrada do utilizador (para sair).
+     */
     public static void getSystemStats(Scanner scanner) {
         System.out.println("\n--- MODO DASHBOARD (TEMPO REAL) ---");
         System.out.println("A conectar ao fluxo de dados...");
@@ -313,6 +433,13 @@ public class Client {
     // Auxiliares
     // -------------------------------------------------------------------------
 
+    /**
+     * Exibe resultados de pesquisa ou links de forma paginada.
+     *
+     * @param results Lista de URLs a exibir.
+     * @param descriptions Mapa opcional com metadados (Título, Citação) para exibição rica.
+     * @param type Tipo de listagem (para título da secção).
+     */
     private static void showPagedResults(List<String> results, Map<String, UrlMetadata> descriptions, String type) {
         Scanner scanner = new Scanner(System.in);
         int total = results.size();
@@ -361,11 +488,23 @@ public class Client {
         }
     }
 
+    /**
+     * Valida se uma string é um URL válido (começado por http, https ou ftp).
+     *
+     * @param url A string a validar.
+     * @return true se o formato for válido, false caso contrário.
+     */
     private static boolean isValidURL(String url) {
         String regex = "^(https?|ftp)://[^\\s/$.?#].\\S*$";
         return Pattern.compile(regex).matcher(url).matches();
     }
 
+    /**
+     * Ponto de entrada da aplicação Cliente.
+     * Tenta conectar ao Gateway e, se bem-sucedido, exibe o menu.
+     *
+     * @param args Argumentos de linha de comando (não utilizados).
+     */
     public static void main(String[] args) {
         if (connectToGateway()) {
             showMenu();

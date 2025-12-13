@@ -15,6 +15,21 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Controlador principal da aplicação Web (Spring MVC).
+ * <p>
+ * Esta classe gere as requisições HTTP para a interface do utilizador, incluindo:
+ * <ul>
+ * <li>Apresentação da página inicial e resultados de pesquisa.</li>
+ * <li>Lógica de paginação e extração de metadados especiais.</li>
+ * <li>Integração com serviços externos (OpenAI e Hacker News) para enriquecer a experiência.</li>
+ * <li>Submissão de URLs para indexação.</li>
+ * </ul>
+ * </p>
+ *
+ * @author Ivan, Rodrigo e Samuel
+ * @version 1.0
+ */
 @Controller
 public class SearchController {
 
@@ -22,6 +37,13 @@ public class SearchController {
     private final OpenAIService openAIService;
     private final HackerNewsService hackerNewsService;
 
+    /**
+     * Construtor do controlador com injeção de dependências.
+     *
+     * @param googolService Serviço de comunicação com o Gateway RMI.
+     * @param openAIService Serviço para geração de resumos via IA.
+     * @param hackerNewsService Serviço de integração com a API do Hacker News.
+     */
     public SearchController(GoogolService googolService,
                             OpenAIService openAIService,
                             HackerNewsService hackerNewsService) {
@@ -30,6 +52,22 @@ public class SearchController {
         this.hackerNewsService = hackerNewsService;
     }
 
+    /**
+     * Trata os pedidos GET para a página inicial ("/") e para a exibição de resultados de pesquisa.
+     * <p>
+     * Este método realiza várias operações complexas:
+     * 1. Solicita a pesquisa ao serviço Googol.
+     * 2. Processa um metadado especial ({@code ##META_STATS##}) para obter o número total real de resultados,
+     * permitindo o cálculo correto da paginação.
+     * 3. Se for a primeira página, solicita um resumo gerado por IA (OpenAI).
+     * 4. Preenche o {@code Model} com os dados necessários para a template Thymeleaf.
+     * </p>
+     *
+     * @param query A string de pesquisa (opcional).
+     * @param page O número da página atual (predefinição: 1).
+     * @param model O modelo para passar dados para a vista.
+     * @return O nome da vista a ser renderizada ("index").
+     */
     @GetMapping("/")
     public String index(
             @RequestParam(name = "q", required = false) String query,
@@ -82,6 +120,17 @@ public class SearchController {
     }
 
     // --- 2. INDEXAR HACKER NEWS (MANTÉM-SE IGUAL) ---
+
+    /**
+     * Trata o pedido POST para indexar notícias do Hacker News baseadas num termo.
+     * <p>
+     * Pesquisa na API do Hacker News e envia os URLs encontrados para a fila de indexação do Googol.
+     * </p>
+     *
+     * @param query O termo a pesquisar no Hacker News.
+     * @param attrs Atributos para passar mensagens "flash" (sucesso/erro) após o redirecionamento.
+     * @return Redireciona para a página inicial.
+     */
     @PostMapping("/hacker-news/index")
     public String indexHackerNews(@RequestParam("query") String query, RedirectAttributes attrs) {
         List<String> urls = hackerNewsService.searchAndGetUrls(query);
@@ -104,6 +153,14 @@ public class SearchController {
     }
 
     // --- 3. INDEXAR URL MANUAL (MANTÉM-SE IGUAL) ---
+
+    /**
+     * Trata o pedido POST para a indexação manual de um URL específico.
+     *
+     * @param url O URL a ser indexado.
+     * @param attrs Atributos para passar mensagens de feedback ao utilizador.
+     * @return Redireciona para a página inicial.
+     */
     @PostMapping("/index")
     public String indexUrl(@RequestParam("url") String url, RedirectAttributes attrs) {
         boolean success = googolService.indexURL(url);
@@ -118,6 +175,14 @@ public class SearchController {
     }
 
     // --- 4. LINKS DE ENTRADA (MANTÉM-SE IGUAL) ---
+
+    /**
+     * Trata o pedido GET para visualizar os links que apontam para um determinado URL (Backlinks).
+     *
+     * @param url O URL alvo para o qual se pretendem ver os links de entrada.
+     * @param model O modelo para passar a lista de links para a vista.
+     * @return O nome da vista a ser renderizada ("links").
+     */
     @GetMapping("/links")
     public String incomingLinks(@RequestParam("url") String url, Model model) {
         List<String> links = googolService.getIncomingLinks(url);

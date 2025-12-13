@@ -10,20 +10,48 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Serviço de integração com a API pública do Hacker News.
+ * <p>
+ * Permite pesquisar nas "Top Stories" atuais do Hacker News por artigos que
+ * contenham determinados termos no título, retornando os seus URLs para indexação.
+ * </p>
+ *
+ * @author Ivan, Rodrigo e Samuel
+ * @version 1.0
+ */
 @Service
 public class HackerNewsService {
 
+    /**
+     * URL base da API do Hacker News.
+     */
     private final String BASE_URL = "https://hacker-news.firebaseio.com/v0";
+
+    /**
+     * Cliente REST para efetuar chamadas HTTP.
+     */
     private final RestTemplate restTemplate;
 
+    /**
+     * Construtor do serviço.
+     */
     public HackerNewsService() {
         this.restTemplate = new RestTemplate();
     }
 
     /**
-     * Procura nas Top Stories do Hacker News por artigos que contenham o termo.
-     * @param query Termo de pesquisa
-     * @return Lista de URLs encontrados
+     * Pesquisa nas Top Stories do Hacker News por artigos que correspondam ao termo.
+     * <p>
+     * O processo envolve:
+     * 1. Obter a lista de IDs das "topstories".
+     * 2. Iterar sobre os primeiros 30 IDs.
+     * 3. Obter os detalhes de cada história (título e URL).
+     * 4. Filtrar as histórias cujo título contenha o termo pesquisado.
+     * </p>
+     *
+     * @param query Termo de pesquisa.
+     * @return Lista de URLs dos artigos encontrados.
      */
     public List<String> searchAndGetUrls(String query) {
         List<String> foundUrls = new ArrayList<>();
