@@ -184,7 +184,7 @@ public class URLQueue implements IQueue {
             registry.rebind("URLQueueInterface", stub);
 
             System.out.println("Queue ready on " + hostIP + ":" + port);
-            queue.addURL("https://www.uc.pt");
+            // queue.addURL("https://www.uc.pt");
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 try {
