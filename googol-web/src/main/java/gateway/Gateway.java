@@ -248,6 +248,7 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
                     long start = System.currentTimeMillis();
 
                     // Tenta executar com repetições (Retry Logic)
+                    // O Barrel agora já faz a ordenação e a paginação internamente!
                     Map<String, UrlMetadata> result = RetryLogic.executeWithRetry(
                             3, 2000,
                             () -> tryReconnect(barrelName),
@@ -260,7 +261,8 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
                     updateInternalStats(chosen, terms, Collections.emptyList(), elapsed);
                     updateSystemStatistics();
 
-                    return sortByIncomingLinks(result, chosen);
+                    // ALTERAÇÃO: Retorna direto. Não ordenamos mais aqui para evitar lentidão.
+                    return result;
 
                 } catch (RemoteException e) {
                     handleBarrelFailure(chosen, e, "search");
@@ -377,8 +379,24 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
     }
 
     private void updateInternalStats(IBarrel barrel, List<String> terms, List<String> urls, long elapsed) {
-        for (String t : terms) termFrequency.put(t, termFrequency.getOrDefault(t, 0) + 1);
-        for (String u : urls) urlFrequency.put(u, urlFrequency.getOrDefault(u, 0) + 1);
+        for (String t : terms) {
+            // LÓGICA NOVA: Remove a tag [PAGE:X] antes de contar para a estatística
+            String termoLimpo = t;
+            if (t.contains("[PAGE:")) {
+                try {
+                    termoLimpo = t.substring(0, t.lastIndexOf("[PAGE:"));
+                } catch (Exception ignored) {}
+            }
+
+            // Só conta se a palavra não for vazia
+            if (!termoLimpo.isEmpty()) {
+                termFrequency.put(termoLimpo, termFrequency.getOrDefault(termoLimpo, 0) + 1);
+            }
+        }
+
+        for (String u : urls) {
+            urlFrequency.put(u, urlFrequency.getOrDefault(u, 0) + 1);
+        }
 
         if (elapsed > 0) {
             responseTimes.computeIfAbsent(barrel, k -> new ArrayList<>()).add(elapsed);
@@ -429,6 +447,9 @@ public class Gateway extends UnicastRemoteObject implements IGateway {
 
     public static void main(String[] args) {
         try {
+            // ALTERAÇÃO: Força o uso do localhost para evitar erros de rede (192.168.x.x)
+            System.setProperty("java.rmi.server.hostname", "127.0.0.1");
+
             Gateway gateway = new Gateway();
             Registry registry = LocateRegistry.getRegistry("localhost", 1099);
             registry.rebind("Gateway", gateway);

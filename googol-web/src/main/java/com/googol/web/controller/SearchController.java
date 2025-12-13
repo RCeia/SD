@@ -2,7 +2,7 @@ package com.googol.web.controller;
 
 import com.googol.web.service.GoogolService;
 import com.googol.web.service.OpenAIService;
-import com.googol.web.service.HackerNewsService; // <--- NOVO IMPORT
+import com.googol.web.service.HackerNewsService;
 import common.UrlMetadata;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -20,9 +20,8 @@ public class SearchController {
 
     private final GoogolService googolService;
     private final OpenAIService openAIService;
-    private final HackerNewsService hackerNewsService; // <--- NOVO SERVIÇO
+    private final HackerNewsService hackerNewsService;
 
-    // Injeção de dependência dos 3 serviços
     public SearchController(GoogolService googolService,
                             OpenAIService openAIService,
                             HackerNewsService hackerNewsService) {
@@ -31,7 +30,6 @@ public class SearchController {
         this.hackerNewsService = hackerNewsService;
     }
 
-    // --- 1. PÁGINA PRINCIPAL E PESQUISA ---
     @GetMapping("/")
     public String index(
             @RequestParam(name = "q", required = false) String query,
@@ -39,20 +37,34 @@ public class SearchController {
             Model model
     ) {
         if (query != null && !query.trim().isEmpty()) {
-            // A. Resultados RMI
-            Map<String, UrlMetadata> resultsMap = googolService.search(query);
-            List<Map.Entry<String, UrlMetadata>> resultList = new ArrayList<>(resultsMap.entrySet());
-
-            // B. Paginação
-            int pageSize = 10;
-            int totalResults = resultList.size();
-            int totalPages = (int) Math.ceil((double) totalResults / pageSize);
             if (page < 1) page = 1;
-            if (page > totalPages && totalPages > 0) page = totalPages;
-            int start = (page - 1) * pageSize;
-            int end = Math.min(start + pageSize, totalResults);
-            List<Map.Entry<String, UrlMetadata>> pageResults = new ArrayList<>();
-            if (start < totalResults) pageResults = resultList.subList(start, end);
+
+            // 1. Obter resultados brutos
+            Map<String, UrlMetadata> resultsMap = googolService.search(query, page);
+
+            // 2. O TRUQUE: Procurar o total escondido
+            int totalResults = 0;
+            if (resultsMap.containsKey("##META_STATS##")) {
+                try {
+                    // Lemos o número que guardámos na descrição
+                    String strCount = resultsMap.get("##META_STATS##").getCitation();
+                    totalResults = Integer.parseInt(strCount);
+                } catch (Exception e) {
+                    totalResults = resultsMap.size(); // Fallback
+                }
+                // IMPORTANTE: Remover do mapa para não aparecer como resultado visual
+                resultsMap.remove("##META_STATS##");
+            } else {
+                // Se não vier stat (ex: lista vazia), o total é o tamanho da lista
+                totalResults = resultsMap.size();
+            }
+
+            List<Map.Entry<String, UrlMetadata>> pageResults = new ArrayList<>(resultsMap.entrySet());
+
+            // 3. Calcular Paginação Real
+            int pageSize = 10;
+            // Math.ceil precisa de double para funcionar bem
+            int totalPages = (int) Math.ceil((double) totalResults / pageSize);
 
             // C. IA (Apenas página 1)
             if (page == 1) {
@@ -63,24 +75,21 @@ public class SearchController {
             model.addAttribute("results", pageResults);
             model.addAttribute("currentPage", page);
             model.addAttribute("totalPages", totalPages);
-            model.addAttribute("totalResults", totalResults);
+            model.addAttribute("totalResults", totalResults); // Agora já não é null!
             model.addAttribute("query", query);
         }
         return "index";
     }
 
-    // --- 2. INDEXAR HACKER NEWS (ATUALIZADO) ---
+    // --- 2. INDEXAR HACKER NEWS (MANTÉM-SE IGUAL) ---
     @PostMapping("/hacker-news/index")
     public String indexHackerNews(@RequestParam("query") String query, RedirectAttributes attrs) {
-
-        // 1. Buscar URLs no Hacker News
         List<String> urls = hackerNewsService.searchAndGetUrls(query);
 
         if (urls.isEmpty()) {
             attrs.addFlashAttribute("message", "Hacker News: Nenhuma 'top story' encontrada com o termo '" + query + "'.");
             attrs.addFlashAttribute("msgType", "error");
         } else {
-            // 2. Mandar indexar cada URL encontrado
             int count = 0;
             for (String url : urls) {
                 if (googolService.indexURL(url)) {
@@ -90,16 +99,11 @@ public class SearchController {
             attrs.addFlashAttribute("message", "Hacker News: " + count + " URLs enviados para indexação sobre '" + query + "'.");
             attrs.addFlashAttribute("msgType", "success");
         }
-
-        // --- A ALTERAÇÃO MÁGICA ESTÁ AQUI ---
-        // Adiciona a query ao URL de destino.
-        // O resultado será um redirecionamento para "/?q=termo_pesquisado"
         attrs.addAttribute("q", query);
-
         return "redirect:/";
     }
 
-    // --- 3. INDEXAR URL MANUAL ---
+    // --- 3. INDEXAR URL MANUAL (MANTÉM-SE IGUAL) ---
     @PostMapping("/index")
     public String indexUrl(@RequestParam("url") String url, RedirectAttributes attrs) {
         boolean success = googolService.indexURL(url);
@@ -113,7 +117,7 @@ public class SearchController {
         return "redirect:/";
     }
 
-    // --- 4. LINKS DE ENTRADA ---
+    // --- 4. LINKS DE ENTRADA (MANTÉM-SE IGUAL) ---
     @GetMapping("/links")
     public String incomingLinks(@RequestParam("url") String url, Model model) {
         List<String> links = googolService.getIncomingLinks(url);

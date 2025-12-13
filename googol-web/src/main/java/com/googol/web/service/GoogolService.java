@@ -51,18 +51,18 @@ public class GoogolService {
     }
 
     // --- Métodos de Pesquisa ---
-
     /**
      * Devolve uma lista dos termos a pesquisar e devolve os resultados da pesquisa
-     * @param query
+     * @param query Termos a pesquisar
+     * @param page Número da página (1, 2, 3...)
      * @return resultados da pesquisa
      */
-    public Map<String, UrlMetadata> search(String query) {
+    public Map<String, UrlMetadata> search(String query, int page) { // <--- 1. ADICIONAR int page
         try {
             if (gateway == null) connectToGateway();
             if (gateway == null) return new HashMap<>();
 
-            // ArrayList de termos de pesquisa independentes para que possamos retirar as Stop Words
+            // ArrayList de termos de pesquisa independentes
             List<String> terms = new ArrayList<>(Arrays.asList(query.trim().split("\\s+")));
 
             // [SERVIÇO DE STOP WORDS] - Bloquear a pesquisa de termos que sejam Stop Words
@@ -70,18 +70,28 @@ public class GoogolService {
                 try {
                     Set<String> stopWords = new HashSet<>(stopWordsService.getStopWords());
 
-                    System.out.println(stopWords);
-
+                    // Remove stop words (ex: "o", "a", "de")
                     terms.removeIf(term -> stopWords.contains(term.toLowerCase()));
 
                     if (terms.isEmpty()) {
                         return new HashMap<>();
                     }
                 } catch (RemoteException e) {
-                    System.err.println("Aviso: Não foi possível aceder às stop words. Prosseguindo sem filtro.");
+                    System.err.println("Aviso: Não foi possível aceder às stop words.");
                 }
             }
+
+            // --- 2. NOVA LÓGICA DE PAGINAÇÃO AQUI ---
+            // Se a página for maior que 1, colamos a etiqueta no primeiro termo da lista.
+            // Exemplo: ["futebol", "benfica"] -> ["futebol[PAGE:2]", "benfica"]
+            // O Barrel vai ler isto e saber que queres a página 2.
+            if (page > 1 && !terms.isEmpty()) {
+                String firstTerm = terms.get(0);
+                terms.set(0, firstTerm + "[PAGE:" + page + "]");
+            }
+
             return gateway.search(terms);
+
         } catch (Exception e) {
             e.printStackTrace();
             gateway = null;

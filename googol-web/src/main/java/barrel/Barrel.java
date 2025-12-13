@@ -52,20 +52,73 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
 
     @Override
     public synchronized Map<String, UrlMetadata> search(List<String> terms) throws RemoteException {
-        Map<String, UrlMetadata> results = new LinkedHashMap<>();
-        if (!isActive) return results; // Se não estiver ativo, retorna vazio
+        if (!isActive) return new HashMap<>();
 
-        for (String term : terms) {
-            Set<String> urls = invertedIndex.get(term.toLowerCase());
-            if (urls != null) {
-                for (String url : urls) {
-                    UrlMetadata meta = pageMetadata.get(url);
-                    if (meta == null) meta = new UrlMetadata("Sem Título", "Sem descrição.");
-                    results.put(url, meta);
+        // 1. Lógica de Paginação (Parse do [PAGE:X])
+        int page = 1;
+        int pageSize = 10;
+        List<String> realTerms = new ArrayList<>();
+
+        for (String t : terms) {
+            if (t.contains("[PAGE:")) {
+                try {
+                    int idx = t.lastIndexOf("[PAGE:");
+                    String num = t.substring(idx + 6, t.indexOf("]", idx));
+                    page = Integer.parseInt(num);
+                    // Adiciona apenas a palavra real à lista de pesquisa
+                    realTerms.add(t.substring(0, idx));
+                } catch (Exception e) {
+                    realTerms.add(t); // Fallback se falhar o parse
                 }
+            } else {
+                realTerms.add(t);
             }
         }
-        return results;
+
+        // 2. Coletar TODOS os resultados (Sem duplicados)
+        Set<String> uniqueUrls = new HashSet<>();
+        for (String term : realTerms) {
+            Set<String> urls = invertedIndex.get(term.toLowerCase());
+            if (urls != null) {
+                uniqueUrls.addAll(urls);
+            }
+        }
+
+        // 3. Converter para Lista para poder ORDENAR
+        List<String> sortedUrls = new ArrayList<>(uniqueUrls);
+
+        // AQUI ESTÁ A ORDENAÇÃO: Quem tem mais incomingLinks fica em primeiro
+        sortedUrls.sort((url1, url2) -> {
+            int count1 = incomingLinks.getOrDefault(url1, Collections.emptySet()).size();
+            int count2 = incomingLinks.getOrDefault(url2, Collections.emptySet()).size();
+            return Integer.compare(count2, count1); // Ordem Decrescente
+        });
+
+        // 4. Calcular Paginação e TOTAL REAL
+        int totalReal = sortedUrls.size(); // <--- Guardamos o total aqui!
+        int start = (page - 1) * pageSize;
+        int end = Math.min(start + pageSize, totalReal);
+
+        Map<String, UrlMetadata> pageResults = new LinkedHashMap<>();
+
+        // 5. Construir o Mapa apenas com os 10 itens vencedores
+        // Só entramos no loop se a página pedida for válida
+        if (start < totalReal && start >= 0) {
+            for (int i = start; i < end; i++) {
+                String url = sortedUrls.get(i);
+                UrlMetadata meta = pageMetadata.get(url);
+                if (meta == null) meta = new UrlMetadata("Sem Título", "Sem descrição.");
+                pageResults.put(url, meta);
+            }
+        }
+
+        // 6. O TRUQUE FINAL: Enviar o total real numa entrada especial
+        // O Controller vai ler isto, guardar o número e remover a entrada.
+        pageResults.put("##META_STATS##", new UrlMetadata("Stats", String.valueOf(totalReal)));
+
+        System.out.println("[" + name + "] Pesquisa por " + realTerms + " (Pag " + page + ") enviando " + (pageResults.size() - 1) + " de " + totalReal + " resultados.");
+
+        return pageResults;
     }
 
     // Getters padrão da interface...
