@@ -25,7 +25,6 @@ import java.util.Map;
  * <li>Integração com serviços externos (OpenAI e Hacker News) para enriquecer a experiência.</li>
  * <li>Submissão de URLs para indexação.</li>
  * </ul>
- * </p>
  *
  * @author Ivan, Rodrigo e Samuel
  * @version 1.0

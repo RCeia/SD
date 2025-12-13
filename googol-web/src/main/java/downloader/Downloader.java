@@ -34,7 +34,6 @@ import java.net.InetAddress;
  * <li>Enviar os dados processados para os Barrels via Multicast fiável.</li>
  * <li>Extrair novos links e enviá-los de volta para a Queue.</li>
  * </ul>
- * </p>
  *
  * @author Ivan, Rodrigo e Samuel
  * @version 2.0

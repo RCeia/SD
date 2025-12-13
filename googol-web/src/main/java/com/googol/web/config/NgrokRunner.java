@@ -12,7 +12,6 @@ import java.io.IOException;
  * Este componente escuta o evento de arranque da aplicação Spring Boot e tenta
  * iniciar o executável do Ngrok localmente. O objetivo é expor a porta segura (8443)
  * para a internet automaticamente, facilitando testes de integração e callbacks externos.
- * </p>
  *
  * @author Ivan, Rodrigo e Samuel
  * @version 1.0
@@ -30,7 +29,6 @@ public class NgrokRunner {
      * <li>Deteta o sistema operativo (Windows ou macOS).</li>
      * <li>Monta e executa o comando para abrir o túnel numa nova janela de terminal.</li>
      * </ol>
-     * </p>
      */
     @EventListener(ApplicationReadyEvent.class)
     public void autoStartNgrok() {

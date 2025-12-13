@@ -339,7 +339,7 @@ public class Barrel extends UnicastRemoteObject implements IBarrel {
     }
 
     /**
-     * Cria uma cópia profunda de um mapa do tipo Map<String, Set<String>>.
+     * Cria uma cópia profunda de um mapa do tipo {@code Map<String, Set<String>>}.
      * Necessário para garantir thread-safety e evitar ConcurrentModificationException durante a sincronização.
      *
      * @param original O mapa original.

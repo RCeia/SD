@@ -21,7 +21,6 @@ import java.util.*;
  * <li>Gerir a subscrição para receber estatísticas em tempo real.</li>
  * <li>Aplicar filtros de Stop Words antes de enviar as pesquisas.</li>
  * </ul>
- * </p>
  *
  * @author Ivan, Rodrigo e Samuel
  * @version 1.0

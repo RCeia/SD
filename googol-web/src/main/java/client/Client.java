@@ -25,7 +25,6 @@ import java.util.regex.Pattern;
  * <li>Consultar links de entrada (incoming links).</li>
  * <li>Visualizar um dashboard em tempo real com estatísticas do sistema.</li>
  * </ul>
- * </p>
  *
  * @author Ivan, Rodrigo e Samuel
  * @version 1.0

@@ -26,7 +26,6 @@ import java.net.ConnectException;
  * <li>Agregação de estatísticas do sistema e notificação em tempo real via Callbacks.</li>
  * <li>Monitorização da "saúde" dos Barrels (Heartbeat).</li>
  * </ul>
- * </p>
  *
  * @author Ivan, Rodrigo e Samuel
  * @version 2.0

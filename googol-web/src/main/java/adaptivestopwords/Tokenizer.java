@@ -34,7 +34,6 @@ public class Tokenizer {
      * <li>Divide a string resultante por espaços em branco.</li>
      * <li>Filtra tokens vazios resultantes de múltiplos espaços.</li>
      * </ul>
-     * </p>
      *
      * @param text O texto original a ser processado.
      * @return Uma lista contendo as palavras extraídas. Retorna uma lista vazia se a entrada for inválida.
